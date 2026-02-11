@@ -1,0 +1,248 @@
+[
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": "+79138430019",
+        "address": "ул Чехова, д. 4, кв. 1",
+        "time": "20:30",
+        "delivery_date": "11.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 100,
+        "items": [
+            {
+                "name": "Курица Стандарт (Сырная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 290
+            },
+            {
+                "name": "Курица Мини (Шашлычная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 220
+            }
+        ],
+        "total": 610,
+        "timestamp": "2026-02-10T08:09:41.025440+00:00"
+    },
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": "+79138430019",
+        "address": "ул Чехова, д. 4, кв. 1",
+        "time": "18:00",
+        "delivery_date": "11.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 100,
+        "items": [
+            {
+                "name": "Курица Стандарт (Сырная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 290
+            },
+            {
+                "name": "Курица Мини (Шашлычная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 220
+            }
+        ],
+        "total": 610,
+        "timestamp": "2026-02-10T08:11:58.028796+00:00"
+    },
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": "+79138430019",
+        "address": "ул Чехова, д. 4, кв. 1",
+        "time": "18:00",
+        "delivery_date": "11.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 100,
+        "items": [
+            {
+                "name": "Курица Стандарт (Сырная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 290
+            },
+            {
+                "name": "Курица Мини (Шашлычная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 220
+            }
+        ],
+        "total": 610,
+        "timestamp": "2026-02-10T08:14:26.659246+00:00"
+    },
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": "+79138430019",
+        "address": "ул Чехова, д. 4, кв. 1",
+        "time": "18:00",
+        "delivery_date": "11.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 100,
+        "items": [
+            {
+                "name": "Курица Стандарт (Сырная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 290
+            },
+            {
+                "name": "Курица Мини (Шашлычная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 220
+            }
+        ],
+        "total": 610,
+        "timestamp": "2026-02-10T08:17:33.157251+00:00"
+    },
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": "+79138430019",
+        "address": "ул Чехова, д. 4, кв. 1",
+        "time": "18:00",
+        "delivery_date": "25.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 100,
+        "items": [
+            {
+                "name": "Курица Стандарт (Сырная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 290
+            },
+            {
+                "name": "Курица Мини (Шашлычная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 220
+            }
+        ],
+        "total": 610,
+        "timestamp": "2026-02-10T08:24:25.248964+00:00"
+    },
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": "+79234416130",
+        "address": "ул Чехова, д. 4, кв. 1",
+        "time": "18:00",
+        "delivery_date": "11.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 100,
+        "items": [
+            {
+                "name": "Курица Стандарт (Сырная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 290
+            },
+            {
+                "name": "Курица Мини (Шашлычная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 220
+            }
+        ],
+        "total": 610,
+        "timestamp": "2026-02-10T08:29:45.890288+00:00"
+    },
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": "+79138430019",
+        "address": "ул Чехова, д. 4, кв. 1",
+        "time": "18:00",
+        "delivery_date": "11.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 100,
+        "items": [
+            {
+                "name": "Курица Стандарт (Сырная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 290
+            },
+            {
+                "name": "Курица Мини (Шашлычная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 220
+            }
+        ],
+        "total": 610,
+        "timestamp": "2026-02-10T08:32:20.270378+00:00"
+    },
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": "+79138430019",
+        "address": "ул Чехова, д. 4, кв. 1",
+        "time": "19:00",
+        "delivery_date": "11.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 100,
+        "items": [
+            {
+                "name": "Курица Стандарт (Сырная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 290
+            },
+            {
+                "name": "Курица Мини (Шашлычная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 220
+            },
+            {
+                "name": "Лава креветка",
+                "qty": 2,
+                "comment": "",
+                "source_price": 360
+            }
+        ],
+        "total": 1330,
+        "timestamp": "2026-02-10T08:34:05.278554+00:00"
+    },
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": "+79138430019",
+        "address": "ул Чехова, д. 4, кв. 1",
+        "time": "14:25",
+        "delivery_date": "11.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 100,
+        "items": [
+            {
+                "name": "Курица Стандарт (Сырная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 290
+            },
+            {
+                "name": "Курица Мини (Шашлычная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 220
+            },
+            {
+                "name": "Пепперони 30",
+                "qty": 1,
+                "comment": "",
+                "source_price": 530
+            }
+        ],
+        "total": 1140,
+        "timestamp": "2026-02-10T08:39:45.073880+00:00"
+    }
+]

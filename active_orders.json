@@ -1,0 +1,482 @@
+[
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": "+79234219983",
+        "address": "Советская 8/a (Орхидея)",
+        "time": "17:00",
+        "delivery_date": "10.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "items": [
+            {
+                "name": "Маки роллы (Креветка)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 300
+            },
+            {
+                "name": "Лава (Лосось)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 360
+            },
+            {
+                "name": "Калифорния (Лосось)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 390
+            },
+            {
+                "name": "Имбирь 50Гр",
+                "qty": 1,
+                "comment": "",
+                "source_price": 40
+            },
+            {
+                "name": "Васаби 10Гр",
+                "qty": 1,
+                "comment": "",
+                "source_price": 15
+            }
+        ],
+        "total": 1105,
+        "timestamp": "2026-02-10T08:42:09.125409+00:00"
+    },
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": "+79234057352",
+        "address": "Советская 8/a (Орхидея)",
+        "time": "17:00",
+        "delivery_date": "10.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "items": [
+            {
+                "name": "Темпура лава (Креветка)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 370
+            },
+            {
+                "name": "Темпура (Краб)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 320
+            },
+            {
+                "name": "Темпура лава (Краб)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 360
+            },
+            {
+                "name": "Темпура (Креветка)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 330
+            },
+            {
+                "name": "Имбирь 50Гр",
+                "qty": 1,
+                "comment": "",
+                "source_price": 40
+            },
+            {
+                "name": "Соевый Соус 50Мл",
+                "qty": 2,
+                "comment": "",
+                "source_price": 30
+            },
+            {
+                "name": "Бамбуковые Палочки",
+                "qty": 2,
+                "comment": "",
+                "source_price": 5
+            },
+            {
+                "name": "Запеченые роллы (Креветка)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 370
+            }
+        ],
+        "total": 1860,
+        "timestamp": "2026-02-10T08:48:12.258796+00:00"
+    },
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": "+79131034301",
+        "address": "Техническая 5/2",
+        "time": "19:00",
+        "delivery_date": "10.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 100,
+        "items": [
+            {
+                "name": "Лава курица",
+                "qty": 1,
+                "comment": "",
+                "source_price": 350
+            },
+            {
+                "name": "Темпура биг",
+                "qty": 1,
+                "comment": "",
+                "source_price": 410
+            },
+            {
+                "name": "Чикен чиз",
+                "qty": 1,
+                "comment": "",
+                "source_price": 330
+            },
+            {
+                "name": "Томато маки",
+                "qty": 1,
+                "comment": "",
+                "source_price": 240
+            },
+            {
+                "name": "Каппа маки",
+                "qty": 1,
+                "comment": "",
+                "source_price": 240
+            },
+            {
+                "name": "Соевый ",
+                "qty": 2,
+                "comment": "",
+                "source_price": 30
+            }
+        ],
+        "total": 1730,
+        "timestamp": "2026-02-10T08:52:04.397555+00:00"
+    },
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": "+79528089221",
+        "address": "Полевая 7",
+        "time": null,
+        "delivery_date": "10.02.2026",
+        "delivery_zone": "Толмачево",
+        "delivery_price": 150,
+        "items": [
+            {
+                "name": "Лава креветка",
+                "qty": 3,
+                "comment": "",
+                "source_price": 360
+            },
+            {
+                "name": "Имбирь",
+                "qty": 1,
+                "comment": "",
+                "source_price": 40
+            }
+        ],
+        "total": 1270,
+        "timestamp": "2026-02-10T09:26:16.568965+00:00"
+    },
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": null,
+        "address": "30 лет победы 4б",
+        "time": null,
+        "delivery_date": "10.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 100,
+        "items": [
+            {
+                "name": "Пепперони 30",
+                "qty": 1,
+                "comment": "",
+                "source_price": 530
+            },
+            {
+                "name": "Маргарита 30",
+                "qty": 1,
+                "comment": "",
+                "source_price": 450
+            },
+            {
+                "name": "Лава креветка",
+                "qty": 2,
+                "comment": "",
+                "source_price": 360
+            },
+            {
+                "name": "Соевый ",
+                "qty": 2,
+                "comment": "",
+                "source_price": 30
+            }
+        ],
+        "total": 1860,
+        "timestamp": "2026-02-10T09:34:25.703741+00:00"
+    },
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": "+79528954681",
+        "address": "Советская 8/a (Орхидея)",
+        "time": "18:00",
+        "delivery_date": "10.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "items": [
+            {
+                "name": "Beтчинa Mини (Всё включено)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 190
+            }
+        ],
+        "total": 190,
+        "timestamp": "2026-02-10T10:21:11.210845+00:00"
+    },
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": "+79528954681",
+        "address": "Советская 8/a (Орхидея)",
+        "time": null,
+        "delivery_date": "10.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "items": [
+            {
+                "name": "Beтчинa Mини (Всё включено)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 190
+            }
+        ],
+        "total": 190,
+        "timestamp": "2026-02-10T10:32:25.800026+00:00"
+    },
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": "+79234416130",
+        "address": "Советская 8",
+        "time": "18:00",
+        "delivery_date": "10.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 100,
+        "items": [
+            {
+                "name": "Лава лосось",
+                "qty": 1,
+                "comment": "",
+                "source_price": 360
+            },
+            {
+                "name": "Филадельфия лайт",
+                "qty": 1,
+                "comment": "",
+                "source_price": 410
+            },
+            {
+                "name": "Ямаха",
+                "qty": 1,
+                "comment": "",
+                "source_price": 340
+            }
+        ],
+        "total": 1210,
+        "timestamp": "2026-02-10T10:39:53.600504+00:00"
+    },
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": "+79131034301",
+        "address": "Техническая 5/2",
+        "time": "19:00",
+        "delivery_date": "10.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 100,
+        "items": [
+            {
+                "name": "Лава курица",
+                "qty": 1,
+                "comment": "",
+                "source_price": 350
+            },
+            {
+                "name": "Темпура биг",
+                "qty": 1,
+                "comment": "",
+                "source_price": 410
+            },
+            {
+                "name": "Чикен чиз",
+                "qty": 1,
+                "comment": "",
+                "source_price": 330
+            },
+            {
+                "name": "Томато маки",
+                "qty": 1,
+                "comment": "",
+                "source_price": 240
+            },
+            {
+                "name": "Каппа маки",
+                "qty": 1,
+                "comment": "",
+                "source_price": 240
+            },
+            {
+                "name": "Соевый ",
+                "qty": 2,
+                "comment": "",
+                "source_price": 30
+            }
+        ],
+        "total": 1730,
+        "timestamp": "2026-02-10T10:45:38.163575+00:00"
+    },
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": "+79138420716",
+        "address": null,
+        "time": null,
+        "delivery_date": "10.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "items": [
+            {
+                "name": "Сочное трио",
+                "qty": 1,
+                "comment": "",
+                "source_price": 960
+            },
+            {
+                "name": "Лава креветка",
+                "qty": 1,
+                "comment": "",
+                "source_price": 360
+            },
+            {
+                "name": "Чикен чиз",
+                "qty": 1,
+                "comment": "",
+                "source_price": 330
+            },
+            {
+                "name": "Яки сяке маки",
+                "qty": 1,
+                "comment": "",
+                "source_price": 370
+            },
+            {
+                "name": "Васаби",
+                "qty": 1,
+                "comment": "",
+                "source_price": 15
+            },
+            {
+                "name": "Имбирь",
+                "qty": 3,
+                "comment": "",
+                "source_price": 40
+            }
+        ],
+        "total": 2155,
+        "timestamp": "2026-02-10T10:47:39.236708+00:00"
+    },
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": "+79138420716",
+        "address": null,
+        "time": null,
+        "delivery_date": "10.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "items": [
+            {
+                "name": "Сочное трио",
+                "qty": 1,
+                "comment": "",
+                "source_price": 960
+            },
+            {
+                "name": "Лава креветка",
+                "qty": 1,
+                "comment": "",
+                "source_price": 360
+            },
+            {
+                "name": "Чикен чиз",
+                "qty": 1,
+                "comment": "",
+                "source_price": 330
+            },
+            {
+                "name": "Яки сяке маки",
+                "qty": 1,
+                "comment": "",
+                "source_price": 370
+            },
+            {
+                "name": "Васаби",
+                "qty": 1,
+                "comment": "",
+                "source_price": 15
+            },
+            {
+                "name": "Имбирь",
+                "qty": 3,
+                "comment": "",
+                "source_price": 40
+            }
+        ],
+        "total": 2155,
+        "timestamp": "2026-02-10T11:04:00.885887+00:00"
+    },
+    {
+        "user_id": 8516527249,
+        "client_name": "Михаил",
+        "phone": "+79521848222",
+        "address": null,
+        "time": null,
+        "delivery_date": "10.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "items": [
+            {
+                "name": "Сочное трио",
+                "qty": 1,
+                "comment": "",
+                "source_price": 960
+            },
+            {
+                "name": "Спайси креветка",
+                "qty": 1,
+                "comment": "",
+                "source_price": 360
+            },
+            {
+                "name": "Имбирь",
+                "qty": 2,
+                "comment": "",
+                "source_price": 40
+            },
+            {
+                "name": "Соевый ",
+                "qty": 2,
+                "comment": "",
+                "source_price": 30
+            }
+        ],
+        "total": 1460,
+        "timestamp": "2026-02-10T12:00:16.007452+00:00"
+    }
+]
