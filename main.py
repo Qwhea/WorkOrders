@@ -1,81 +1,710 @@
+import ast
 import asyncio
 import logging
 import re
 import socket
 import subprocess
+import textwrap
 from datetime import datetime, timezone
+from textwrap import dedent
+
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import pandas as pd
 import json
 import os
-from fuzzywuzzy import process, fuzz
+import requests
 
 import tempfile
 import win32print
 import win32api
 
+import time
+
 from datetime import timedelta
+from fuzzywuzzy import fuzz
+
+import speech_recognition as sr
+from pydub import AudioSegment
+import tempfile
+import os
+from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.enums import ChatType
+
+
+USER_PHONE_MAP = {}  # {user_id: "79991234567"}
 
 
 # --- Конфигурация ---
 API_ID = 33621079
 API_HASH = "5378ac906c789310f63f3c60f2063b6e"
 BOT_TOKEN = "8472836665:AAGqmM0rVEbnWA_xjYdjmYh2wd6ytgHNRBk"
+PHONE = "79832378779"
 
-WORK_GROUP = -1003646541060
-THREAD_NOW_ID = 3087
-THREAD_FUTURE_ID = 3089
 
-ORDERS_JSON = "orders.json"
+OPENROUTER_API_KEY = "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"
+OPENROUTER_MODEL = "deepseek/deepseek-chat-v3-0324"
+
+main = False
+
+if main:
+    WORK_GROUP = -1003702747405
+    THREAD_NOW_ID = 2
+    THREAD_ORDER_ID = None
+    THREAD_DELIVERY_ID = 74
+else:
+    WORK_GROUP = -1003646541060
+    THREAD_NOW_ID = 3087
+    THREAD_ORDER_ID = None
+    THREAD_DELIVERY_ID = 4462
+
+
 ACTIVE_ORDERS_JSON = "active_orders.json"  # ← новое
 FUTURE_ORDERS_JSON = "future_orders.json"  # ← новое
+PENDING_ORDERS_JSON = "pending_orders.json"
 MENU_XLSX = "menu.xlsx"
 ADDRESS_XLSX = "adress.xlsx"
 PRINTER_NAME = "80C"
+ADMIN_MESSAGES = []  # Список message_id, отправленных в /admin
+
+awaiting_edit_from_message = None  # Будет содержать order_id
+
+MAX_QUANTITY = 29  # Максимальное количество, которое можно указать
+
 
 bot_app = Client("bot_session", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# --- Работа с данными ---
-def load_orders():
-    if os.path.exists(ORDERS_JSON):
-        with open(ORDERS_JSON, "r", encoding="utf-8") as f:
-            return json.load(f)
+PHONE_JSON = "user_phones.json"
+
+def find_menu_item_fuzzy(name: str):
+    """
+    Находит блюдо из меню по частичному или нечёткому совпадению.
+    """
+    name = name.strip().lower()
+
+    # 1. Точное совпадение
+    for item in MENU_ITEMS:
+        if item["name"].lower() == name:
+            return item
+
+    # 2. Частичное вхождение
+    for item in MENU_ITEMS:
+        if name in item["name"].lower():
+            return item
+
+    # 3. Fuzzy-поиск
+    best_match = None
+    best_ratio = 0
+    for item in MENU_ITEMS:
+        ratio = fuzz.ratio(name, item["name"].lower())
+        if ratio > best_ratio and ratio >= 85:
+            best_ratio = ratio
+            best_match = item
+
+    if best_match:
+        logging.info(f"🔍 Fuzzy-совпадение: '{name}' → '{best_match['name']}' (схожесть: {best_ratio})")
+        return best_match
+
+    return None
+
+def load_user_phones():
+    """Загружает привязки user_id → phone из файла."""
+    global USER_PHONE_MAP
+    if os.path.exists(PHONE_JSON):
+        try:
+            with open(PHONE_JSON, "r", encoding="utf-8") as f:
+                USER_PHONE_MAP = json.load(f)
+                # Преобразуем ключи в int
+                USER_PHONE_MAP = {int(k): v for k, v in USER_PHONE_MAP.items()}
+            logging.info(f"✅ Загружено {len(USER_PHONE_MAP)} привязок телефонов")
+        except Exception as e:
+            logging.error(f"❌ Ошибка загрузки {PHONE_JSON}: {e}")
+    else:
+        USER_PHONE_MAP = {}
+
+def save_user_phones():
+    """Сохраняет привязки в файл."""
+    try:
+        with open(PHONE_JSON, "w", encoding="utf-8") as f:
+            json.dump(USER_PHONE_MAP, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logging.error(f"❌ Ошибка сохранения {PHONE_JSON}: {e}")
+
+def voice_to_text(file_path: str) -> str:
+    """
+    Конвертирует голосовое сообщение в текст.
+    :param file_path: путь к .ogg файлу
+    :return: распознанный текст или пустая строка
+    """
+    try:
+        # Конвертация OGG → WAV
+        audio = AudioSegment.from_file(file_path)
+        wav_path = file_path.replace(".ogg", ".wav")
+        audio.export(wav_path, format="wav")
+
+        # Распознавание речи
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(wav_path) as source:
+            audio_data = recognizer.record(source)
+            text = recognizer.recognize_google(audio_data, language="ru-RU")
+
+        # Удаляем временный WAV
+        if os.path.exists(wav_path):
+            os.remove(wav_path)
+
+        return text.strip()
+
+    except sr.UnknownValueError:
+        print("❌ Google не смог распознать аудио")
+        return ""
+    except sr.RequestError as e:
+        print(f"❌ Ошибка сервиса распознавания: {e}")
+        return ""
+    except Exception as e:
+        print(f"❌ Ошибка при обработке аудио: {e}")
+        return ""
+
+async def animate_waiting(message):
+    """
+    Анимирует сообщение: "Обработка." → "Обработка.." → "Обработка..."
+    """
+    dots = 0
+    try:
+        while True:
+            dots = (dots % 3) + 1
+            await message.edit_text(f"⏳ Обработка{'.' * dots}")
+            await asyncio.sleep(0.7)
+    except asyncio.CancelledError:
+        pass
+
+async def update_message_to_order_check(order_id, message):
+    """
+    Редактирует существующее сообщение (например, "Обработка") на чек заказа.
+    Используется для анимации ожидания → чек.
+    """
+    state = ORDER_STATE.get(order_id)
+    if not state:
+        logging.warning(f"❌ Не найдено состояние для order_id={order_id}")
+        return
+
+    delivery_zone = state.get("delivery_zone")
+    delivery_cost = state.get("delivery_price", 0)
+    delivery_date = state.get("delivery_date")
+
+    total = calculate_total(state["items"], delivery_price=delivery_cost)
+    status_emoji = "⏳"
+    order_text = (
+            f"{status_emoji} <b>Заказ</b>\n"
+            f"📞 Телефон: {state['phone'] or 'не указан'}\n"
+            f"⏰ Время: {state['time'] or 'не указано'}\n"
+            + (f"📅 Дата: {delivery_date}\n" if delivery_date else "")
+            + f"🏠 Адрес: {state['address'] or 'не указан'}\n"
+              f"📍 Зона: {delivery_zone if delivery_zone else 'Не определена'}\n"
+              f"🚚 Доставка: {delivery_cost} ₽\n\n"
+              f"🍣 Блюда:\n" + "\n".join([
+        f"• {it['qty']}x {it['name']} — {it['qty'] * it.get('source_price', 0)} ₽"
+        + (f"\n  ⚠️ {it['comment'].capitalize()}" if it['comment'] else "")
+        for it in state["items"]
+    ]) +
+            f"\n\n💰 <b>Итого: {total} ₽</b>"
+    )
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📤 Отправить заказ", callback_data=f"send_to_group:{order_id}")],
+        [InlineKeyboardButton("❌ Отменить заказ", callback_data=f"cancel_order:{order_id}")]
+    ])
+
+    try:
+        await message.edit_text(order_text, reply_markup=keyboard)
+    except Exception as e:
+        logging.error(f"❌ Ошибка при редактировании сообщения в чек: {e}")
+
+@bot_app.on_message(filters.private & filters.voice)
+async def handle_voice_message(client, message):
+    user_id = message.from_user.id
+    try:
+        os.makedirs("downloads", exist_ok=True)
+        voice_file = f"downloads/voice_{user_id}.ogg"
+
+        logging.info(f"📥 Начинаем скачивание голосового сообщения от {user_id}...")
+        await client.download_media(message, file_name=voice_file)
+        logging.info(f"✅ Голосовое сообщение сохранено: {voice_file}")
+
+        for _ in range(5):
+            if os.path.exists(voice_file) and os.path.getsize(voice_file) > 100:
+                break
+            time.sleep(0.5)
+        else:
+            if not os.path.exists(voice_file):
+                await message.reply("❌ Не удалось скачать голосовое сообщение.")
+                return
+            if os.path.getsize(voice_file) <= 100:
+                await message.reply("❌ Голосовое сообщение слишком короткое или пустое.")
+                os.remove(voice_file)
+                return
+
+        try:
+            audio = AudioSegment.from_file(voice_file)
+            wav_path = voice_file.replace(".ogg", ".wav")
+            audio.export(wav_path, format="wav")
+            logging.info(f"🔊 Конвертировано в WAV: {wav_path}")
+        except Exception as e:
+            logging.error(f"❌ Ошибка конвертации OGG → WAV: {e}")
+            await message.reply("❌ Не удалось обработать аудиофайл.")
+            return
+
+        recognizer = sr.Recognizer()
+        try:
+            with sr.AudioFile(wav_path) as source:
+                audio_data = recognizer.record(source)
+                text = recognizer.recognize_google(audio_data, language="ru-RU")
+                logging.info(f"🗣️ Распознано: {text}")
+        except sr.UnknownValueError:
+            await message.reply("❌ Не удалось распознать речь.")
+            return
+        except sr.RequestError as e:
+            logging.error(f"❌ Ошибка сервиса Google: {e}")
+            await message.reply("⚠️ Сервис распознавания временно недоступен.")
+            return
+
+        for path in [voice_file, wav_path]:
+            if os.path.exists(path):
+                os.remove(path)
+
+        phone = USER_PHONE_MAP.get(user_id)
+        if not phone:
+            await message.reply("📱 Сначала привяжите номер через /start")
+            return
+
+        # === 🕐 ПОКАЗЫВАЕМ АНИМАЦИЮ ОЖИДАНИЯ ===
+        status_msg = await message.reply("⏳ Обработка может занять несколько секунд...")
+        animation_task = asyncio.create_task(animate_waiting(status_msg))
+
+        try:
+            ai_result = await parse_order_with_openrouter(text, menu_items=MENU_ITEMS, delivery_zones=DELIVERY_ZONES)
+        except Exception as e:
+            ai_result = None
+            logging.error(f"❌ Ошибка при вызове OpenRouter: {e}")
+        finally:
+            # Останавливаем анимацию
+            animation_task.cancel()
+            try:
+                await animation_task
+            except asyncio.CancelledError:
+                pass
+
+        if not ai_result:
+            try:
+                await status_msg.edit_text("❌ Не удалось распознать заказ. Попробуйте снова.")
+            except:
+                pass
+            return
+
+        logging.info(f"🧠 AI результат: {ai_result}")
+
+        # === Обработка позиций ===
+        items = []
+        total_menu_price = 0
+        unrecognized = []
+
+        for item in ai_result.get("items", []):
+            name = item["name"].strip()
+            qty = item["qty"]
+
+            matched_item = find_menu_item_fuzzy(name)
+            if matched_item:
+                source_price = matched_item["price"]
+                total_menu_price += source_price * qty
+                items.append({
+                    "name": matched_item["name"],
+                    "qty": qty,
+                    "comment": item.get("comment", ""),
+                    "source_price": source_price
+                })
+            else:
+                unrecognized.append(name)
+
+        if unrecognized:
+            await status_msg.edit_text(f"⚠️ Эти блюда не найдены в меню: {', '.join(unrecognized)}")
+            return
+
+        if not items:
+            await status_msg.edit_text("❌ Не распознано ни одного блюда из меню.")
+            return
+
+        # === Телефон ===
+        result_phone = ai_result.get("phone") or phone
+        if not result_phone.startswith("+7") and result_phone.startswith("7"):
+            result_phone = "+" + result_phone
+        elif not result_phone.startswith("+7"):
+            result_phone = "+7" + result_phone[-10:]
+
+        # === Адрес ===
+        address_input = ai_result.get("address")
+        full_address = ""
+        if isinstance(address_input, dict):
+            street = address_input.get("street", "").strip()
+            house = address_input.get("house", "").strip()
+            apartment = address_input.get("apartment", "").strip()
+            full_address = f"{street} {house}".strip()
+            if apartment:
+                full_address += f" кв. {apartment}"
+        else:
+            full_address = str(address_input).strip() if address_input else ""
+
+        is_self_pickup = any(kw in full_address.lower() for kw in ["самовывоз", "лично", "заберу"]) if full_address else False
+
+        # === Зона доставки ===
+        matches = []
+        delivery_zone = "Самовывоз"
+        delivery_price = 0
+
+        if full_address and not is_self_pickup:
+            matches = find_delivery_zone_by_address(full_address)
+            if matches:
+                zone, price, _ = matches[0]
+                delivery_zone = zone
+                delivery_price = price
+            else:
+                delivery_zone = "Самовывоз"
+                delivery_price = 0
+        else:
+            full_address = "Самовывоз"
+
+        # === Время и дата ===
+        time_guess = ai_result.get("time", "")
+        delivery_date = ai_result.get("delivery_date") or parse_delivery_date(time_guess)
+        if not delivery_date:
+            delivery_date = datetime.now().strftime("%d.%m.%Y")
+
+        # === Сохраняем состояние ===
+        order_id = generate_order_id()
+        initialize_user_state(order_id)
+
+        saved_order = {
+            "id": order_id,
+            "items": items,
+            "phone": result_phone,
+            "address": full_address,
+            "time": time_guess,
+            "delivery_date": delivery_date,
+            "delivery_zone": delivery_zone,
+            "delivery_price": delivery_price,
+            "comment": ai_result.get("comment", ""),
+            "total": total_menu_price + delivery_price,
+            "status": "pending",
+            "created_at": datetime.now().isoformat()
+        }
+
+        state = ORDER_STATE[order_id]
+        state.update({
+            "items": items,
+            "phone": result_phone,
+            "address": full_address,
+            "time": time_guess,
+            "delivery_date": delivery_date,
+            "delivery_zone": delivery_zone,
+            "delivery_price": delivery_price,
+            "status": "not_accepted"
+        })
+
+        add_pending_order(saved_order)
+        logging.info(f"✅ Заказ добавлен в pending: ID={order_id}")
+
+        # === РЕДАКТИРУЕМ СООБЩЕНИЕ НА ЧЕК ===
+        await update_message_to_order_check(order_id, status_msg)
+
+    except Exception as e:
+        logging.error(f"❌ Критическая ошибка при обработке голоса: {e}", exc_info=True)
+        await message.reply("⚠️ Произошла ошибка при обработке голосового сообщения.")
+
+async def parse_order_with_openrouter(text: str, menu_items=None, delivery_zones=None):
+    """
+    Парсит текст заказа через OpenRouter с актуальным меню и зонами.
+    """
+    if menu_items is None:
+        menu_items = []
+    if delivery_zones is None:
+        delivery_zones = {}
+
+    # ✅ Используем ПАРАМЕТР, а не глобальную переменную
+    menu_lines = "\n".join([
+        f"- {item['name']} — {item['price']} ₽"
+        for item in menu_items
+    ]) if menu_items else "Меню не загружено."
+
+
+    # Аналогично для зон доставки (если используете delivery_zones)
+    zones_text = ""
+    if delivery_zones:
+        zones_text = "\n".join([
+            f"{zone} → {price} ₽"
+            for zone, price in delivery_zones.items()
+        ])
+    else:
+        try:
+            df = pd.read_excel("adress.xlsx")
+            street_col = next((col for col in df.columns if "street" in col.lower()), "street")
+            zone_col = next((col for col in df.columns if "zone" in col.lower()), "zone")
+            price_col = next((col for col in df.columns if "price" in col.lower()), "price")
+
+            zones_text = "\n".join([
+                f"{row[street_col]} → {row[zone_col]} ({int(row[price_col])} ₽)"
+                for _, row in df.iterrows() if pd.notna(row[price_col])
+            ])
+        except Exception as e:
+            logging.error(f"❌ Ошибка чтения adress.xlsx: {e}")
+            zones_text = "Не загружено"
+        menu_lines = "\n".join([f"- {item['name']} — {item['price']} ₽" for item in menu_items])
+        zones_text = "\n".join([f"- {zone} → {price} ₽" for zone, price in DELIVERY_ZONES.items()])
+
+    prompt = f"""
+Ты — ассистент пиццерии. Проанализируй текст заказа и верни строго JSON.
+Сегодня {datetime.now().strftime('%d.%m.%Y')}.
+
+### Меню:
+{menu_lines}
+
+### Зоны доставки:
+{zones_text}
+
+### Текст заказа:
+
+{text}
+
+Правила:
+- Если количество не указано — ставь 1.
+- Адрес разбивай: улица, дом, корпус, подъезд, этаж, квартира.
+- Телефон нормализуй: +7XXXXXXXXXX.
+- Время доставки: если не указано — ближайшее возможное.
+- Комментарий — всё, что не попало в другие поля.
+- Сумма: суммируй цены из меню.
+- Позиции: только те, что есть в меню. Неизвестные — в комментарий.
+
+Верни только JSON:
+{{
+  "items": [{{"name": "Пицца", "qty": 2, "source_price": 300}}],
+  "address": {{"street": "Ленина", "house": "10"}},
+  "phone": "+79991234567",
+  "time": "13:30",
+  "delivery_date": "05.04.2025",
+  "comment": "",
+  "total": 600
+}}
+"""
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": f"{OPENROUTER_MODEL}",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+        "max_tokens": 1024
+    }
+    try:
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=15
+        )
+        response.raise_for_status()
+        content = response.json()["choices"][0]["message"]["content"].strip()
+
+        logging.info("📥 Ответ от OpenRouter:")
+        logging.info(content)
+
+        # 🔁 Заменяем JavaScript-значения на Python-совместимые
+        content = re.sub(r'\bnull\b', 'None', content, flags=re.IGNORECASE)
+        content = re.sub(r'\btrue\b', 'True', content, flags=re.IGNORECASE)
+        content = re.sub(r'\bfalse\b', 'False', content, flags=re.IGNORECASE)
+
+        # Ищем JSON
+        json_start = content.find("{")
+        json_end = content.rfind("}") + 1
+        if json_start == -1 or json_end == 0:
+            raise ValueError("JSON не найден в ответе")
+
+        parsed_json = ast.literal_eval(content[json_start:json_end])
+        return parsed_json
+
+    except Exception as e:
+        logging.error(f"❌ Ошибка при обращении к OpenRouter: {e}")
+        return None
+
+def load_pending_orders():
+    """Загружает заказы из pending_orders.json"""
+    if os.path.exists(PENDING_ORDERS_JSON):
+        try:
+            with open(PENDING_ORDERS_JSON, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else {}
+        except Exception as e:
+            logging.error(f"❌ Ошибка чтения pending_orders.json: {e}")
     return {}
 
-def save_orders(orders):
-    with open(ORDERS_JSON, "w", encoding="utf-8") as f:
+def save_pending_orders(orders):
+    """Сохраняет заказы в pending_orders.json"""
+    try:
+        with open(PENDING_ORDERS_JSON, "w", encoding="utf-8") as f:
+            json.dump(orders, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logging.error(f"❌ Ошибка записи pending_orders.json: {e}")
+
+def add_pending_order(new_order):
+    """Добавляет заказ в pending_orders.json (формат: dict с id как ключом)"""
+    if not isinstance(new_order, dict):
+        logging.error(f"❌ add_pending_order: ожидался dict, получено {type(new_order)}")
+        return
+
+    orders = load_pending_orders()  # Должен вернуть dict
+    order_id = str(new_order.get("id"))
+
+    if not order_id:
+        order_id = str(int(datetime.now().timestamp()))
+        new_order["id"] = order_id
+
+    # Обновляем/добавляем запись
+    orders[order_id] = new_order
+    save_pending_orders(orders)
+    logging.info(f"✅ Добавлен в ожидание: ID={order_id}")
+
+def update_pending_order_in_file(order_id, state):
+    """Обновляет заказ в pending_orders.json (формат: dict)"""
+    orders = load_pending_orders()
+    order_key = str(order_id)
+
+    if order_key not in orders:
+        logging.warning(f"❌ Не найден заказ для обновления: {order_id}")
+        return
+
+    # Обновляем поля
+    orders[order_key].update({
+        "items": state["items"],
+        "phone": state["phone"],
+        "address": state["address"],
+        "time": state["time"],
+        "delivery_date": state["delivery_date"],
+        "delivery_zone": state["delivery_zone"],
+        "delivery_price": state["delivery_price"],
+        "total": calculate_total(state["items"], state["delivery_price"]),
+        "status": "pending"
+    })
+
+    save_pending_orders(orders)
+    logging.info(f"🔄 Обновлён заказ в pending_orders.json: {order_id}")
+
+def save_active_orders(orders):
+    with open(ACTIVE_ORDERS_JSON,"w", encoding="utf-8") as f:
         json.dump(orders, f, ensure_ascii=False, indent=4)
 
 def load_active_orders():
-    if os.path.exists(ACTIVE_ORDERS_JSON):
-        with open(ACTIVE_ORDERS_JSON, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
+    """Загружает список активных заказов. Если файла нет или он повреждён — возвращает пустой список."""
+    if not os.path.exists(ACTIVE_ORDERS_JSON):
+        logging.warning(f"⚠️ Файл {ACTIVE_ORDERS_JSON} не найден. Создаётся новый.")
+        return []
 
-def save_active_orders(orders):
+    try:
+        with open(ACTIVE_ORDERS_JSON, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+            if not content:
+                logging.warning(f"⚠️ Файл {ACTIVE_ORDERS_JSON} пуст. Возвращаем пустой список.")
+                return []
+            return json.loads(content)
+    except json.JSONDecodeError as e:
+        logging.error(f"❌ Ошибка парсинга {ACTIVE_ORDERS_JSON}: {e}")
+        logging.info("🔄 Создаём новый пустой файл...")
+        save_active_orders([])
+        return []
+    except Exception as e:
+        logging.error(f"❌ Неожиданная ошибка при загрузке {ACTIVE_ORDERS_JSON}: {e}")
+        return []
+
+
+def add_active_order(new_order):
+    """Добавляет один заказ в active_orders.json"""
+    if not isinstance(new_order, dict):
+        logging.error(f"❌ add_active_order: ожидался dict, получено {type(new_order)}")
+        return
+
+    orders = load_active_orders()
+
+    # Генерируем ID, если его нет
+    order_id = new_order.get("id") or int(datetime.now().timestamp())
+    new_order["id"] = order_id
+
+    orders.append(new_order)
+
     with open(ACTIVE_ORDERS_JSON, "w", encoding="utf-8") as f:
         json.dump(orders, f, ensure_ascii=False, indent=4)
 
+    logging.info(f"✅ Добавлен активный заказ: ID={order_id}")
+
+
 def load_future_orders():
-    if os.path.exists(FUTURE_ORDERS_JSON):
+    """Загружает список будущих заказов. Если файла нет или он повреждён — возвращает пустой список."""
+    if not os.path.exists(FUTURE_ORDERS_JSON):
+        logging.warning(f"⚠️ Файл {FUTURE_ORDERS_JSON} не найден. Создаётся новый.")
+        return []
+
+    try:
         with open(FUTURE_ORDERS_JSON, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
+            content = f.read().strip()
+            if not content:
+                logging.warning(f"⚠️ Файл {FUTURE_ORDERS_JSON} пуст. Возвращаем пустой список.")
+                return []
+            return json.loads(content)
+    except json.JSONDecodeError as e:
+        logging.error(f"❌ Ошибка парсинга {FUTURE_ORDERS_JSON}: {e}")
+        logging.info("🔄 Создаём новый пустой файл...")
+        save_future_orders([])
+        return []
+    except Exception as e:
+        logging.error(f"❌ Неожиданная ошибка при загрузке {FUTURE_ORDERS_JSON}: {e}")
+        return []
 
 def save_future_orders(orders):
+    """Сохраняет список будущих заказов"""
     with open(FUTURE_ORDERS_JSON, "w", encoding="utf-8") as f:
         json.dump(orders, f, ensure_ascii=False, indent=4)
 
+def add_future_order(new_order):
+    """Добавляет один заказ в future_orders.json"""
+    if not isinstance(new_order, dict):
+        logging.error(f"❌ add_future_order: ожидался dict, получено {type(new_order)}")
+        return
+
+    orders = load_future_orders()
+
+    order_id = new_order.get("id") or int(datetime.now().timestamp())
+    new_order["id"] = order_id
+
+    orders.append(new_order)
+
+    with open(FUTURE_ORDERS_JSON, "w", encoding="utf-8") as f:
+        json.dump(orders, f, ensure_ascii=False, indent=4)
+
+    logging.info(f"✅ Добавлен будущий заказ: ID={order_id}, дата={new_order.get('delivery_date')}")
 
 # --- Глобальные переменные ---
 MENU_ITEMS = []
 MENU_NAMES = []
 DELIVERY_ZONES = {}  # { "район": цена }
 STREET_NAMES = []    # Список чистых названий улиц из базы
-USER_EDIT_STATE = {}
+ORDER_STATE = {}  # Храним заказы по уникальному order_id
+current_order_id = 0  # Счётчик для генерации ID
 CATEGORIES = []
 
+
+@bot_app.on_message(filters.command("id"))
+async def get_thread_id(client, message):
+    thread_id = message.reply_to_message_id
+    await message.reply(f"🧵 `message_thread_id` = `{thread_id}`")
+
+def generate_order_id():
+    global current_order_id
+    current_order_id += 1
+    return f"order_{int(time.time())}_{current_order_id}"
 
 def load_menu():
     global MENU_ITEMS
@@ -171,171 +800,19 @@ def load_street_names():
         logging.error(f"❌ Ошибка загрузки улиц: {e}")
         return []
 
-# --- Обработчики ---
-@bot_app.on_message(filters.command("start"))
-async def start(client, message):
-    USER_EDIT_STATE.pop(message.from_user.id, None)
-    await message.reply_text(
-        "Привет! 🍣 Отправьте заказ **одним сообщением** в любом порядке. "
-        "Укажите:\n- Названия блюд\n- Количество (опционально)\n- Время доставки\n- Адрес\n- Номер телефона\n\n"
-        "Пример:\n"
-        "2 Лава Креветка без сыра\n"
-        "Завтра 19:00\n"
-        "+7 999 123-45-67\n"
-        "ул. Горького, д. 5, кв. 2, район Центр"
-    )
-
 @bot_app.on_message(filters.command("menu"))
-async def send_menu(client, message):
-    if not MENU_ITEMS:
-        await message.reply_text("Меню временно недоступно.")
+async def show_admin_menu(client, message):
+    if message.chat.id != WORK_GROUP:
+        await message.reply("❌ Эта команда доступна только в рабочей группе.")
         return
 
-    categories = {}
-    for item in MENU_ITEMS:
-        cat = item["category"]
-        if cat not in categories:
-            categories[cat] = []
-        categories[cat].append(f"{item['name']} — {item['price']} ₽")
-
-    response = "📋 Наше меню:\n\n"
-    for category, items in categories.items():
-        response += f"<b>{category}</b>\n"
-        response += "\n".join(items)
-        response += "\n\n"
-
-    await message.reply_text(response)
-
-def parse_order_lines(lines):
-    time_line = None
-    time_line_full = None
-    address_line = None
-    phone_line = None
-
-    time_pattern = r'([0-1]?[0-9]|2[0-3]):([0-5][0-9])'
-    phone_pattern = r'(\+7|8)[- ]?\(?(\d{3})\)?[- ]?(\d{3})[- ]?(\d{2})[- ]?(\d{2})'
-
-    for line in lines:
-        line_stripped = line.strip()
-        if not line_stripped:
-            continue
-        line_lower = line_stripped.lower()
-
-        if not time_line and re.search(time_pattern, line_lower):
-            time_match = re.search(time_pattern, line_lower)
-            time_line = time_match.group(0)
-            time_line_full = line_stripped
-
-        elif not phone_line and re.search(phone_pattern, line_lower):
-            digits = re.sub(r'\D', '', line_stripped)
-            if digits.startswith('8'):
-                digits = '7' + digits[1:]
-            phone_line = '+' + digits if len(digits) == 11 else None
-
-        elif any(word in line_lower for word in ['самовывоз', 'свой', 'лично', 'приду', 'заберу', 'заберу сам']):
-            address_line = "Самовывоз"
-
-    if address_line != "Самовывоз":
-        potential_address_lines = []
-        for line in lines:
-            line_stripped = line.strip()
-            if not line_stripped:
-                continue
-            if (time_line_full and line_stripped == time_line_full) or \
-                    (phone_line and re.sub(r'\D', '', line_stripped) == re.sub(r'\D', '', phone_line)):
-                continue
-            potential_address_lines.append(line_stripped)
-
-        def clean(s):
-            """
-            Очищает название улицы: убирает тип, номер дома, лишние символы.
-            Работает даже с '30 лет Победы', 'Проспект Мира 100' и т.п.
-            """
-            s = str(s).strip().lower()
-
-            # Шаг 1: Убираем тип улицы (даже если он в середине)
-            s = re.sub(r'\b(?:ул\.?|улица|проспект|пр\.?|переулок|пер\.|набережная|шоссе|бульвар|аллея|площадь|пл\.?)\b\s*', '', s)
-
-            # Шаг 2: Убираем номер дома ТОЛЬКО в конце строки
-            s = re.sub(r',?\s*\d+[\s\-\/\\]?\w*\.*\s*(?:кв\.?\s*\d+|корпус\s*\d+|стр\.?\s*\d+)?\s*$', '', s)
-
-            # Шаг 3: Убираем запятые, точки, дефисы и заменяем на один пробел
-            s = re.sub(r'[,\.\-\s]+', ' ', s).strip()
-
-            return s
-
-        for line in potential_address_lines:
-            line_clean = clean(line)
-            if not line_clean:
-                continue
-            match, score = process.extractOne(line_clean, STREET_NAMES, scorer=fuzz.token_sort_ratio)
-            if score >= 80:
-                address_line = line
-                logging.info(f"📍 Адрес распознан: '{line}' → '{match}' (схожесть: {score})")
-                break
-
-    # ВСЕГДА собираем dish_lines из нераспознанных строк
-    dish_lines = []
-    for line in lines:
-        line_stripped = line.strip()
-        if not line_stripped:
-            continue
-
-        # Проверяем, является ли строка временем
-        is_time = time_line_full and line_stripped == time_line_full
-
-        # Проверяем, является ли строкой телефоном
-        is_phone = False
-        if phone_line and line_stripped:
-            digits_line = re.sub(r'\D', '', line_stripped)
-            digits_phone = re.sub(r'\D', '', phone_line)
-            if len(digits_line) >= 10 and len(digits_phone) >= 10:
-                is_phone = digits_line[-10:] == digits_phone[-10:]
-
-        # Проверяем, является ли строкой адресом
-        is_address = address_line and line_stripped == address_line
-
-        if is_time or is_phone or is_address:
-            continue
-        else:
-            dish_lines.append(line_stripped)
-
-    logging.info(f"📞 Найден телефон: {phone_line}")
-    logging.info(f"⏰ Время: {time_line_full} ({time_line})")
-    logging.info(f"🏠 Адрес: {address_line}")
-    logging.info(f"🍽️ Блюда: {dish_lines}")
-
-    return dish_lines, time_line, address_line, phone_line
-
-def find_item_by_name(detected_item, threshold=60):
-    if not detected_item or len(detected_item.strip()) < 2:
-        return None
-
-    detected_norm = detected_item.strip().lower()
-
-    if detected_norm.isdigit() or len(detected_norm) < 3:
-        return None
-
-    if not MENU_ITEMS:
-        logging.error("❌ MENU_ITEMS пуст!")
-        return None
-
-    best_match = None
-    best_ratio = 0
-
-    for item in MENU_ITEMS:
-        name_norm = item["name"].lower()
-        ratio = fuzz.token_sort_ratio(detected_norm, name_norm)
-        if ratio > best_ratio:
-            best_ratio = ratio
-            best_match = item
-
-    if best_match and best_ratio >= threshold:
-        logging.info(f"🔄 '{detected_item}' → '{best_match['name']}' ({best_ratio})")
-        return best_match
-    else:
-        logging.warning(f"❌ Не найдено: '{detected_item}' (лучшая: {best_ratio}, порог: {threshold})")
-        return None
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📦 Активные заказы", callback_data="admin_active_orders"),
+         InlineKeyboardButton("📅 Заказы в будущем", callback_data="admin_future_orders")],
+        [InlineKeyboardButton("💰 Зарплата", callback_data="admin_salary")],
+        [InlineKeyboardButton("✅ Выполненные за сегодня", callback_data="admin_delivered_today")]  # ✅ Новая кнопка
+    ])
+    await message.reply_text("👨‍💼 <b>Админ-меню</b>\nВыберите действие:", reply_markup=keyboard)
 
 def parse_delivery_date(time_text):
     """
@@ -404,8 +881,8 @@ def calculate_total(items, delivery_price=0):
     )
     return items_total + delivery_price  # ✅ Теперь доставка добавляется
 
-def initialize_user_state(user_id):
-    USER_EDIT_STATE[user_id] = {
+def initialize_user_state(order_id):
+    ORDER_STATE[order_id] = {
         "items": [],
         "time": None,
         "address": None,
@@ -420,56 +897,496 @@ def initialize_user_state(user_id):
         "temp_cart": [],
         "category_message_id": None,
         "awaiting": None,
-        "awaiting_edit_order": False  # ← новое состояние
+        "awaiting_edit_order": False,  # ← новое состояние
+        "status": "not_accepted",  # 🆕 Статус: не принят
+        "admin_message_ids": []
     }
 
-@bot_app.on_message(filters.text & ~filters.command(["start", "menu"]))
-async def handle_order(client, message):
+@bot_app.on_message(filters.command("pending"))
+async def show_pending_orders(client, message):
+    orders = load_pending_orders()
+    if not orders:
+        await message.reply("📭 Нет заказов в ожидании подтверждения.")
+        return
+
+    text = "<b>⏳ Заказы в ожидании:</b>\n\n"
+    for order in orders:
+        addr = order.get("address", "—")[:20]
+        phone = order.get("phone", "—")
+        total = order.get("total", 0)
+        order_id = order.get("id", "—")
+        text += f"🔹 <code>{order_id}</code> | {addr}... | {phone} | {total}₽\n"
+
+    await message.reply(text)
+
+@bot_app.on_message(filters.private & filters.command("start"))
+async def start_command(client, message):
+    user_id = message.from_user.id
+    full_name = message.from_user.full_name
+
+    # Проверяем, привязан ли номер
+    phone = USER_PHONE_MAP.get(user_id)
+
+    if phone:
+        # === УЖЕ ПРИВЯЗАН → показываем инлайн-кнопку "Мои заказы" ===
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("📦 Мои заказы", callback_data="my_orders")],
+                # Опционально: кнопка для смены номера
+                # [InlineKeyboardButton("📞 Сменить номер", callback_data="change_phone")]
+            ]
+        )
+        welcome_text = (
+            f"👋 Привет, {full_name}!\n\n"
+            f"📱 Ваш номер <b>уже привязан</b>: <code>{phone}</code>\n\n"
+            "Нажмите кнопку ниже, чтобы посмотреть свои заказы."
+        )
+    else:
+        # === НЕ ПРИВЯЗАН → просим привязать номер ===
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("📞 Привязать номер", callback_data="bind_phone")]
+            ]
+        )
+        welcome_text = (
+            f"👋 Привет, {full_name}!\n\n"
+            "Я — бот для оформления заказов.\n\n"
+            "Чтобы делать заказы и просматривать историю — "
+            "<b>привяжите свой номер телефона</b>."
+        )
+
+    await message.reply_text(welcome_text, reply_markup=keyboard)
+
+@bot_app.on_message(filters.private & filters.text & filters.regex(r"^📞 Привязать номер"))
+async def prompt_for_phone(client, message):
+    await message.reply_text(
+        "📱 Отправьте ваш номер в формате:\n"
+        "<code>79991234567</code>"
+    )
+
+@bot_app.on_callback_query(filters.regex("my_orders"))
+async def my_orders_handler(client, callback):
+    user_id = callback.from_user.id
+    phone = USER_PHONE_MAP.get(user_id)
+
+    if not phone:
+        await callback.answer("❌ Сначала привяжите номер телефона.", show_alert=True)
+        return
+
+    # Нормализуем телефон
+    normalized_phone = phone.replace("+", "")
+
+    # Загружаем все заказы
+    pending_orders = load_pending_orders().values()
+    active_orders = load_active_orders()
+    future_orders = load_future_orders()
+
+    all_orders = list(pending_orders) + active_orders + future_orders
+    user_orders = [
+        order for order in all_orders
+        if isinstance(order, dict) and order.get("phone", "").replace("+", "") == normalized_phone
+    ]
+
+    if not user_orders:
+        await callback.answer("📦 У вас пока нет заказов.", show_alert=True)
+        return
+
+    # Сортируем: новые — сверху
+    user_orders.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+
+    # Отправляем каждый заказ отдельным сообщением
+    for order in user_orders[:5]:  # только последние 5
+        status_emoji = "✅" if order["status"] in ["done", "delivered", "accepted"] else "⏳"
+        delivery_date = order.get("delivery_date", "—")
+        time_str = order.get("time", "По готовности")
+
+        text = (
+            f"{status_emoji} <b>Заказ #{order['id']}</b>\n"
+            f"📅 <b>Дата:</b> {delivery_date}\n"
+            f"⏰ <b>Время:</b> {time_str}\n"
+            f"📍 <b>Адрес:</b> {order.get('address', '—')}\n"
+            f"💰 <b>Сумма:</b> {order['total']} ₽\n"
+        )
+        if order.get("comment"):
+            text += f"❗<i>{order['comment']}</i>\n"
+
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("👁️ Посмотреть", callback_data=f"view_order:{order['id']}")],
+                [InlineKeyboardButton("🔁 Повторить", callback_data=f"repeat_order:{order['id']}")]
+            ]
+        )
+
+        try:
+            await callback.message.reply_text(text, reply_markup=keyboard)
+        except Exception as e:
+            logging.error(f"❌ Не удалось отправить заказ {order['id']}: {e}")
+
+    # Подтверждаем нажатие
+    await callback.answer()
+
+@bot_app.on_callback_query(filters.regex(r"^view_order:"))
+async def view_order_handler(client, callback):
+    order_id = callback.data.split(":", 1)[1]
+    user_id = callback.from_user.id
+    phone = USER_PHONE_MAP.get(user_id)
+
+    if not phone:
+        await callback.answer("❌ Авторизуйтесь через /start", show_alert=True)
+        return
+
+    # Поиск заказа
+    orders = (
+            list(load_pending_orders().values()) +
+            load_active_orders() +
+            load_future_orders()
+    )
+    order = next((o for o in orders if str(o.get("id")) == order_id), None)
+
+    if not order:
+        await callback.answer("❌ Заказ не найден.")
+        return
+
+    # Формируем детали
+    items_text = "\n".join(
+        [f"• {it['qty']}x {it['name']} — {it.get('source_price', 0) * it['qty']}₽"
+         for it in order.get("items", [])]
+    )
+    address = order.get("address") or "—"
+    delivery_cost = order.get("delivery_price", 0)
+
+    text = f"""
+📋 <b>Детали заказа #{order_id}</b>
+
+📞 <b>Телефон:</b> <code>{order.get('phone', '—')}</code>
+🏠 <b>Адрес:</b> {address}
+⏰ <b>Время:</b> {order.get('time', '—')}
+📅 <b>Дата доставки:</b> {order.get('delivery_date', '—')}
+
+🍣 <b>Состав:</b>
+{items_text}
+
+🚚 <b>Доставка:</b> {delivery_cost} ₽
+💰 <b>Итого:</b> <b>{order['total']} ₽</b>
+""".strip()
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔁 Повторить", callback_data=f"repeat_order:{order_id}")],
+        [InlineKeyboardButton("⬅️ Назад к моим заказам", callback_data="my_orders")]
+    ])
+
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
+
+@bot_app.on_callback_query(filters.regex(r"^repeat_order:"))
+async def repeat_order_handler(client, callback):
+    order_id = callback.data.split(":", 1)[1]
+    user_id = callback.from_user.id
+    phone = USER_PHONE_MAP.get(user_id)
+
+    if not phone:
+        await callback.answer("❌ Авторизуйтесь через /start", show_alert=True)
+        return
+
+    # Поиск оригинального заказа
+    orders = (
+            list(load_pending_orders().values()) +
+            load_active_orders() +
+            load_future_orders()
+    )
+    original_order = next((o for o in orders if str(o.get("id")) == order_id), None)
+
+    if not original_order:
+        await callback.answer("❌ Исходный заказ не найден.")
+        return
+
+    # Генерируем новый ID
+    new_order_id = generate_order_id()
+    initialize_user_state(new_order_id)
+
+    # Создаём копию заказа с обновлёнными полями
+    now = datetime.now()
+    saved_order = {
+        "id": new_order_id,
+        "items": original_order["items"],
+        "phone": phone,
+        "address": original_order.get("address"),
+        "time": original_order.get("time"),
+        "delivery_date": now.strftime("%d.%m.%Y"),  # На сегодня
+        "delivery_zone": original_order.get("delivery_zone"),
+        "delivery_price": original_order.get("delivery_price", 0),
+        "comment": original_order.get("comment", ""),
+        "total": calculate_total(original_order["items"], original_order.get("delivery_price", 0)),
+        "status": "pending",
+        "created_at": now.isoformat()
+    }
+
+    # Сохраняем в pending
+    add_pending_order(saved_order)
+
+    # Обновляем состояние
+    state = ORDER_STATE[new_order_id]
+    state.update({
+        "items": original_order["items"],
+        "phone": phone,
+        "address": original_order.get("address"),
+        "time": original_order.get("time"),
+        "delivery_date": now.strftime("%d.%m.%Y"),
+        "delivery_zone": original_order.get("delivery_zone"),
+        "delivery_price": original_order.get("delivery_price", 0),
+        "status": "not_accepted"
+    })
+
+    # Отправляем чек
+    await update_message_to_order_check(new_order_id, callback.message)
+
+    # Уведомление
+    await callback.answer("✅ Заказ повторён! Оформите его ниже.")
+
+@bot_app.on_message(filters.private & filters.text & ~filters.command([]))
+async def handle_private_text(client, message):
     user_id = message.from_user.id
     text = message.text.strip()
-    first_name = message.from_user.first_name
 
-    if user_id not in USER_EDIT_STATE:
-        initialize_user_state(user_id)
+    # === ПРОВЕРКА: может, это номер телефона для привязки? ===
+    phone_match = re.fullmatch(r"7\d{10}", text)
+    if phone_match and user_id not in USER_PHONE_MAP:
+        USER_PHONE_MAP[user_id] = "+" + text
+        save_user_phones()  # Сохраняем в файл
+        await message.reply("✅ Номер телефона успешно привязан!\nТеперь вы можете делать заказы.")
+        return
 
-    state = USER_EDIT_STATE[user_id]
+    phone = USER_PHONE_MAP.get(user_id)
+    if not phone:
+        await message.reply("📱 Сначала привяжите номер через /start")
+        return
 
-    # === РЕЖИМ РЕДАКТИРОВАНИЯ ЗАКАЗА ===
-    if state.get("awaiting_edit_order"):
-        if not text:
-            await message.reply("❌ Сообщение пустое.")
+    logging.info(f"📩 Личка | Получен заказ от {user_id}: '{text[:50]}'")
+
+    # === 🕐 АНИМАЦИЯ ОЖИДАНИЯ ===
+    status_msg = await message.reply("⏳ Обработка может занять несколько секунд...")
+    animation_task = asyncio.create_task(animate_waiting(status_msg))
+
+    try:
+        ai_result = await parse_order_with_openrouter(text, menu_items=MENU_ITEMS, delivery_zones=DELIVERY_ZONES)
+    except Exception as e:
+        ai_result = None
+        logging.error(f"❌ Ошибка при вызове OpenRouter: {e}")
+    finally:
+        animation_task.cancel()
+        try:
+            await animation_task
+        except asyncio.CancelledError:
+            pass
+
+    if not ai_result:
+        try:
+            await status_msg.edit_text("❌ Не удалось распознать заказ. Попробуйте снова.")
+        except:
+            pass
+        return
+
+    # === Обработка позиций ===
+    items = []
+    unrecognized = []
+
+    for item in ai_result.get("items", []):
+        name = item["name"].strip()
+        qty = item["qty"]
+
+        matched_item = find_menu_item_fuzzy(name)
+        if matched_item:
+            items.append({
+                "name": matched_item["name"],
+                "qty": qty,
+                "comment": item.get("comment", ""),
+                "source_price": matched_item["price"]
+            })
+        else:
+            unrecognized.append(name)
+
+    if unrecognized:
+        await status_msg.edit_text(f"⚠️ Эти блюда не найдены в меню: {', '.join(unrecognized)}")
+        return
+
+    if not items:
+        await status_msg.edit_text("❌ Не распознано ни одного блюда из меню.")
+        return
+
+    # === Телефон ===
+    result_phone = ai_result.get("phone") or phone
+    if not result_phone.startswith("+7") and result_phone.startswith("7"):
+        result_phone = "+" + result_phone
+    elif not result_phone.startswith("+7"):
+        result_phone = "+7" + result_phone[-10:]
+
+    # === Адрес ===
+    address_input = ai_result.get("address")
+    full_address = ""
+    if isinstance(address_input, dict):
+        street = address_input.get("street", "").strip()
+        house = address_input.get("house", "").strip()
+        apartment = address_input.get("apartment", "").strip()
+        full_address = f"{street} {house}".strip()
+        if apartment:
+            full_address += f" кв. {apartment}"
+    else:
+        full_address = str(address_input).strip() if address_input else ""
+
+    is_self_pickup = any(kw in full_address.lower() for kw in ["самовывоз", "лично", "заберу"]) if full_address else False
+
+    # === Зона доставки ===
+    matches = []
+    delivery_zone = "Самовывоз"
+    delivery_price = 0
+
+    if full_address and not is_self_pickup:
+        matches = find_delivery_zone_by_address(full_address)
+        if matches:
+            zone, price, _ = matches[0]
+            delivery_zone = zone
+            delivery_price = price
+        else:
+            delivery_zone = "Самовывоз"
+            delivery_price = 0
+    else:
+        full_address = "Самовывоз"
+
+    # === Время и дата ===
+    time_guess = ai_result.get("time", "")
+    delivery_date = ai_result.get("delivery_date") or parse_delivery_date(time_guess)
+    if not delivery_date:
+        delivery_date = datetime.now().strftime("%d.%m.%Y")
+
+    # === Сохраняем состояние ===
+    order_id = generate_order_id()
+    initialize_user_state(order_id)
+
+    saved_order = {
+        "id": order_id,
+        "items": items,
+        "phone": result_phone,
+        "address": full_address,
+        "time": time_guess,
+        "delivery_date": delivery_date,
+        "delivery_zone": delivery_zone,
+        "delivery_price": delivery_price,
+        "comment": ai_result.get("comment", ""),
+        "total": calculate_total(items, delivery_price),
+        "status": "pending",
+        "created_at": datetime.now().isoformat()
+    }
+
+    state = ORDER_STATE[order_id]
+    state.update({
+        "items": items,
+        "phone": result_phone,
+        "address": full_address,
+        "time": time_guess,
+        "delivery_date": delivery_date,
+        "delivery_zone": delivery_zone,
+        "delivery_price": delivery_price,
+        "status": "not_accepted"
+    })
+
+    add_pending_order(saved_order)
+    logging.info(f"✅ Заказ добавлен в pending: ID={order_id}")
+
+    # === РЕДАКТИРУЕМ СООБЩЕНИЕ НА ЧЕК ===
+    await update_message_to_order_check(order_id, status_msg)
+
+
+@bot_app.on_message(filters.text & filters.chat(WORK_GROUP))
+async def handle_order(client, message):
+    thread_id = message.message_thread_id or (
+            message.reply_to_message and message.reply_to_message.message_thread_id
+    ) if message.reply_to_message else None
+    if THREAD_ORDER_ID and thread_id != THREAD_ORDER_ID:
+        return
+
+    text = message.text.strip()
+    order_id = None
+
+    global awaiting_edit_from_message
+
+    # === РЕЖИМ РЕДАКТИРОВАНИЯ ===
+    if awaiting_edit_from_message:
+        order_id = awaiting_edit_from_message
+        awaiting_edit_from_message = None
+
+        state = ORDER_STATE.get(order_id)
+        if not state:
+            logging.warning(f"❌ Ожидалось редактирование order_id={order_id}, но состояние не найдено")
             return
 
-        state["awaiting_edit_order"] = False
-        lines = text.split('\n')
+        state["awaiting_edit_order"] = True
+        logging.info(f"📩 Режим редактирования активирован для {order_id}")
 
-        # Парсим
-        dish_lines, time_guess, address_guess, phone_guess = parse_order_lines(lines)
-
-        # Обновляем дату доставки
-        delivery_date = None
-        for line in lines:
-            if re.search(r'([0-1]?[0-9]|2[0-3]):([0-5][0-9])', line.strip().lower()):
-                delivery_date = parse_delivery_date(line.strip())
+    else:
+        # Поиск по reply_to_message_id
+        for oid, state in ORDER_STATE.items():
+            if state.get("order_message_id") == message.reply_to_message_id:
+                order_id = oid
                 break
+
+        if order_id is None:
+            order_id = generate_order_id()
+            initialize_user_state(order_id)
+            logging.info(f"🆕 Создан новый заказ: {order_id}")
         else:
-            delivery_date = parse_delivery_date(text)
+            logging.info(f"🔄 Найден существующий заказ: {order_id}")
+            pending_orders = load_pending_orders()
+            order_data = next((o for o in pending_orders if str(o.get("id")) == order_id), None)
+            if order_data and order_id not in ORDER_STATE:
+                initialize_user_state(order_id)
+                state = ORDER_STATE[order_id]
+                state.update({
+                    "items": order_data["items"],
+                    "phone": order_data["phone"],
+                    "address": order_data["address"],
+                    "time": order_data["time"],
+                    "delivery_date": order_data["delivery_date"],
+                    "delivery_zone": order_data["delivery_zone"],
+                    "delivery_price": order_data["delivery_price"],
+                    "status": "not_accepted"
+                })
+                logging.info(f"📥 Состояние восстановлено из pending_orders.json")
 
-        # Обновляем телефон
-        if phone_guess:
-            state["phone"] = phone_guess
-            await message.reply(f"📞 Телефон обновлён: {phone_guess}")
+    state = ORDER_STATE[order_id]
+    logging.info(f"📩 Сообщение от {message.from_user.id}: '{text[:50]}'")
 
-        # Обновляем время
-        if time_guess:
-            state["time"] = time_guess
-            state["delivery_date"] = delivery_date
-            await message.reply(f"⏰ Время обновлено: {time_guess}" + (f", дата: {delivery_date}" if delivery_date else ""))
+    # === РЕДАКТИРОВАНИЕ ЧЕРЕЗ ИИ ===
+    if state.get("awaiting_edit_order"):
+        state["awaiting_edit_order"] = False
 
-        # Обновляем адрес
-        if address_guess:
-            state["address"] = address_guess
-            matches = find_delivery_zone_by_address(address_guess)
+        ai_result = await parse_order_with_openrouter(text, menu_items=MENU_ITEMS, delivery_zones=DELIVERY_ZONES)
+        if not ai_result:
+            await message.reply("❌ Не удалось распознать изменения. Проверьте формат.")
+            return
+
+        # Обновляем: телефон, время, дата
+        if ai_result.get("phone"):
+            state["phone"] = ai_result["phone"]
+        if ai_result.get("time"):
+            state["time"] = ai_result["time"]
+            state["delivery_date"] = ai_result.get("delivery_date") or parse_delivery_date(ai_result["time"])
+
+        # Адрес
+        address_input = ai_result.get("address")
+        if address_input:
+            if isinstance(address_input, dict):
+                street = address_input.get("street", "")
+                house = address_input.get("house", "")
+                full_address = f"{street} {house}".strip() if isinstance(address_input, dict) else str(address_input).strip()
+
+                state["address"] = full_address
+            else:
+                full_address = str(address_input).strip()
+
+            state["address"] = full_address
+            state["original_address"] = full_address
+
+            matches = find_delivery_zone_by_address(full_address)
             state["delivery_matches"] = matches
 
             if not matches:
@@ -482,52 +1399,33 @@ async def handle_order(client, message):
                 state["delivery_price"] = price
                 await message.reply(f"🏠 Адрес и зона обновлены: {zone} (+{price} ₽)")
             else:
-                await show_zone_selection(message, matches)
+                await show_zone_selection(message, matches, order_id)
                 return
 
-        # === Добавляем новые блюда к существующим ===
-        found_items = []
+        # Добавляем блюда
+        items = []
         unrecognized = []
 
-        for line in dish_lines:
-            line_stripped = line.strip()
-            if not line_stripped:
-                continue
+        for item in ai_result.get("items", []):
+            name = item["name"].strip()
+            qty = item["qty"]
 
-            # Комментарий после *
-            if '*' in line_stripped:
-                parts = line_stripped.split('*', 1)
-                item_text = parts[0].strip()
-                comment = parts[1].strip()
-            else:
-                item_text = line_stripped
-                comment = ""
-
-            # Количество
-            qty_match = re.match(r'^(\d+)\s+(.+)$', item_text)
-            quantity = 1
-            search_text = item_text
-            if qty_match:
-                quantity = int(qty_match.group(1))
-                search_text = qty_match.group(2).strip()
-
-            matched_item = find_item_by_name(search_text, threshold=60)
+            matched_item = find_menu_item_fuzzy(name)
             if matched_item:
-                found_items.append({
+                items.append({
                     "name": matched_item["name"],
-                    "qty": quantity,
-                    "comment": comment,
+                    "qty": qty,
+                    "comment": item.get("comment", ""),
                     "source_price": matched_item["price"]
                 })
             else:
-                unrecognized.append(line)
+                unrecognized.append(name)
 
         if unrecognized:
-            await message.reply(f"❌ Не распознано: {', '.join(unrecognized)}")
+            await message.reply(f"⚠️ Эти блюда не найдены в меню: {', '.join(unrecognized)}")
 
-        # Добавляем к существующим позициям
         existing_items = state["items"]
-        for new_item in found_items:
+        for new_item in items:
             existing = next((it for it in existing_items if it["name"] == new_item["name"]), None)
             if existing:
                 existing["qty"] += new_item["qty"]
@@ -536,135 +1434,111 @@ async def handle_order(client, message):
             else:
                 existing_items.append(new_item)
 
-        if found_items:
-            items_str = ", ".join([f"{it['qty']}x {it['name']}" for it in found_items])
-            await message.reply(f"✅ Добавлено: {items_str}")
-
-        await update_order_message(user_id, first_name)  # ✅ Правильный вызов
+        update_pending_order_in_file(order_id, state)
+        await update_order_message(order_id)
         return
 
-    # === ОБЫЧНЫЙ РЕЖИМ: новый заказ ===
-    lines = text.split('\n')
-
-    # Проверка внешнего заказа (my2can)
-    if "Новый заказ от" in text:
-        parsed = parse_external_order(text)
-        if not parsed["items"]:
-            await message.reply("❌ Не удалось распознать позиции.")
-            return
-
-        state.update({
-            "items": [i.copy() for i in parsed["items"]],
-            "temp_cart": [],
-            "address": parsed["address"],
-            "phone": parsed["phone"],
-            "time": None,
-            "delivery_date": datetime.now().strftime("%d.%m.%Y"),
-            "delivery_matches": [],
-            "order_message_id": None,
-            "zone_selection_message_id": None,
-            "category_message_id": None,
-            "awaiting": None
-        })
-
-        matches = find_delivery_zone_by_address(parsed["address"])
-        if matches:
-            zone, price, _ = matches[0]
-            state["delivery_zone"] = zone
-            state["delivery_price"] = price
-        else:
-            state["delivery_zone"] = "Самовывоз"
-            state["delivery_price"] = 0
-
-        await show_editable_order_inline(message, parsed.get("client_name", "Клиент"))
+    # === ВНЕШНИЙ ЗАКАЗ my2can ИЛИ ЛЮБОЙ ТЕКСТ → ЕДИНЫЙ ИИ-ПАРСИНГ ===
+    ai_result = await parse_order_with_openrouter(text, menu_items=MENU_ITEMS, delivery_zones=DELIVERY_ZONES)
+    if not ai_result:
+        await message.reply("❌ Не удалось распознать заказ. Проверьте текст или отправьте снова.")
         return
 
-    # Обычный заказ
-    dish_lines, time_guess, address_guess, phone_guess = parse_order_lines(lines)
-
-    # Определение даты
-    delivery_date = None
-    for line in lines:
-        if re.search(r'([0-1]?[0-9]|2[0-3]):([0-5][0-9])', line.strip().lower()):
-            delivery_date = parse_delivery_date(line.strip())
-            break
-    else:
-        delivery_date = parse_delivery_date(text)
-
-    state["delivery_date"] = delivery_date
-
-    # Парсинг блюд
-    found_items = []
+    # Извлекаем данные
+    items = []
     unrecognized = []
 
-    for line in dish_lines:
-        line_stripped = line.strip()
-        if not line_stripped:
-            continue
+    for item in ai_result.get("items", []):
+        name = item["name"].strip()
+        qty = item["qty"]
 
-        if '*' in line_stripped:
-            parts = line_stripped.split('*', 1)
-            item_text = parts[0].strip()
-            comment = parts[1].strip()
-        else:
-            item_text = line_stripped
-            comment = ""
-
-        qty_match = re.match(r'^(\d+)\s+(.+)$', item_text)
-        quantity = 1
-        search_text = item_text
-        if qty_match:
-            quantity = int(qty_match.group(1))
-            search_text = qty_match.group(2).strip()
-
-        matched_item = find_item_by_name(search_text, threshold=60)
+        matched_item = find_menu_item_fuzzy(name)
         if matched_item:
-            found_items.append({
+            items.append({
                 "name": matched_item["name"],
-                "qty": quantity,
-                "comment": comment,
+                "qty": qty,
+                "comment": item.get("comment", ""),
                 "source_price": matched_item["price"]
             })
         else:
-            unrecognized.append(line)
+            unrecognized.append(name)
 
     if unrecognized:
-        await message.reply_text(f"❌ Не распознано: {', '.join(unrecognized)}")
+        await message.reply(f"⚠️ Эти блюда не найдены в меню: {', '.join(unrecognized)}")
+
+    if not items:
+        await message.reply("❌ Не распознано ни одного блюда.")
         return
 
-    if not found_items:
-        await message.reply_text("❌ Ни одно блюдо не найдено.")
-        return
+    phone = ai_result.get("phone")
+    time_guess = ai_result.get("time")
+    delivery_date = ai_result.get("delivery_date") or parse_delivery_date(time_guess)
+    if not delivery_date:
+        delivery_date = datetime.now().strftime("%d.%m.%Y")
 
-    # Полная замена для нового заказа
-    state["items"] = found_items
-    state["time"] = time_guess
-    state["address"] = address_guess
-    state["phone"] = phone_guess
+    # Адрес
+    address_input = ai_result.get("address")
+    full_address = ""
+    if address_input:
+        if isinstance(address_input, dict):
+            street = address_input.get("street", "")
+            house = address_input.get("house", "")
+            full_address = f"{street} {house}".strip()
+        else:
+            full_address = str(address_input).strip()
 
-    if address_guess and "самовывоз" in address_guess.lower():
-        state["delivery_zone"] = "Самовывоз"
-        state["delivery_price"] = 0
-        await show_editable_order_inline(message, first_name)
-        return
+    # Самовывоз?
+    is_self_pickup = any(kw in full_address.lower() for kw in ["самовывоз", "лично", "заберу"]) if full_address else False
 
-    matches = find_delivery_zone_by_address(address_guess) if address_guess else []
-    state["delivery_matches"] = matches
+    # Зона доставки
+    matches = []
+    delivery_zone = "Самовывоз"
+    delivery_price = 0
 
-    if not matches:
-        state["delivery_zone"] = "Самовывоз"
-        state["delivery_price"] = 0
-    elif len(matches) == 1:
-        zone, price, _ = matches[0]
-        state["delivery_zone"] = zone
-        state["delivery_price"] = price
+    if full_address and not is_self_pickup:
+        matches = find_delivery_zone_by_address(full_address)
+        state["delivery_matches"] = matches
+        if matches:
+            zone, price, _ = matches[0]
+            delivery_zone = zone
+            delivery_price = price
+        else:
+            await message.reply("⚠️ Адрес не найден в базе → Самовывоз")
     else:
-        await show_zone_selection(message, matches)
-        return
+        full_address = "Самовывоз"
 
-    await show_editable_order_inline(message, first_name)
+    # Обновляем состояние
+    state.update({
+        "items": items,
+        "phone": phone,
+        "address": full_address,
+        "time": time_guess,
+        "delivery_date": delivery_date,
+        "delivery_zone": delivery_zone,
+        "delivery_price": delivery_price,
+        "status": "not_accepted"
+    })
 
-async def show_zone_selection(message, matches):
+    # Сохраняем в pending_orders.json
+    saved_order = {
+        "id": order_id,
+        "items": items,
+        "phone": phone,
+        "address": full_address,
+        "time": time_guess,
+        "delivery_date": delivery_date,
+        "delivery_zone": delivery_zone,
+        "delivery_price": delivery_price,
+        "total": calculate_total(items, delivery_price),
+        "status": "pending",
+        "created_at": datetime.now().isoformat()
+    }
+    add_pending_order(saved_order)
+
+    # Отправляем чек
+    await show_editable_order_inline(order_id, message)
+
+async def show_zone_selection(message, matches, order_id):
     """Отправляет кнопки для выбора правильной зоны."""
     keyboard = []
     for i, (zone, price, street_db) in enumerate(matches):
@@ -675,24 +1549,40 @@ async def show_zone_selection(message, matches):
 
     # Сохраняем ID сообщения с выбором зоны
     user_id = message.from_user.id
-    USER_EDIT_STATE[user_id]["zone_selection_message_id"] = msg.id
+    ORDER_STATE[order_id]["zone_selection_message_id"] = msg.id
     logging.info(f"📌 Сообщение с выбором зоны сохранено: {msg.id}")
 
 
-async def show_editable_order_inline(message_or_callback, first_name):
-    """Отправляет или редактирует сообщение с заказом и сохраняет его ID."""
-    user_id = message_or_callback.from_user.id
-    state = USER_EDIT_STATE.get(user_id)
+async def show_editable_order_inline(order_id, message_or_callback):
+    """Отправляет или редактирует сообщение с заказом. Кнопки зависят от контекста (личка / группа)."""
+    state = ORDER_STATE.get(order_id)
     if not state:
-        return
+        pending_orders = load_pending_orders()
+        order_data = next((o for o in pending_orders if str(o.get("id")) == order_id), None)
+        if not order_data:
+            logging.warning(f"❌ Не найдено состояние для order_id={order_id}")
+            return
+        initialize_user_state(order_id)
+        state = ORDER_STATE[order_id]
+        state.update({
+            "items": order_data["items"],
+            "phone": order_data["phone"],
+            "address": order_data["address"],
+            "time": order_data["time"],
+            "delivery_date": order_data["delivery_date"],
+            "delivery_zone": order_data["delivery_zone"],
+            "delivery_price": order_data["delivery_price"],
+            "status": "not_accepted"
+        })
 
     delivery_zone = state.get("delivery_zone")
     delivery_cost = state.get("delivery_price", 0)
     delivery_date = state.get("delivery_date")
 
     total = calculate_total(state["items"], delivery_price=delivery_cost)
+    status_emoji = "⏳"
     order_text = (
-            f"📦 <b>Ваш заказ</b>\n"
+            f"{status_emoji} <b>Заказ</b>\n"
             f"📞 Телефон: {state['phone'] or 'не указан'}\n"
             f"⏰ Время: {state['time'] or 'не указано'}\n"
             + (f"📅 Дата: {delivery_date}\n" if delivery_date else "")
@@ -707,30 +1597,41 @@ async def show_editable_order_inline(message_or_callback, first_name):
             f"\n\n💰 <b>Итого: {total} ₽</b>"
     )
 
-    keyboard = InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("➕ Добавить позицию", callback_data="add_item")],
-            [InlineKeyboardButton("➖ Убрать позицию", callback_data="remove_item")],
-            [InlineKeyboardButton("✏️ Редактировать заказ", callback_data="edit_order")],
-            [InlineKeyboardButton("✅ Подтвердить заказ", callback_data="confirm_order")]
-        ]
-    )
+    if isinstance(message_or_callback, CallbackQuery):
+        chat_type = message_or_callback.message.chat.type
+        from_what = "CallbackQuery"
+    else:
+        chat_type = message_or_callback.chat.type
+        from_what = "Message"
 
+    logging.info(f"🔍 Определение chat_type: {chat_type} (источник: {from_what})")
+    logging.info(f"💬 Тип чата: {chat_type}, order_id={order_id}")
 
-    if hasattr(message_or_callback, "message"):  # callback
-        try:
+    # --- КНОПКИ: разные для лички и группы ---
+    if chat_type == ChatType.PRIVATE:
+        # 📱 В ЛИЧНЫХ СООБЩЕНИЯХ
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📤 Отправить заказ", callback_data=f"send_to_group:{order_id}")],
+            [InlineKeyboardButton("❌ Отменить заказ", callback_data=f"cancel_order:{order_id}")]
+        ])
+    else:
+        # 🏢 В ГРУППЕ (рабочей)
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Подтвердить заказ", callback_data=f"confirm_order:{order_id}")],
+            [InlineKeyboardButton("❌ Отменить заказ", callback_data=f"cancel_order:{order_id}")]
+        ])
+
+    try:
+        if isinstance(message_or_callback, CallbackQuery):
             msg = await message_or_callback.message.edit_text(order_text, reply_markup=keyboard)
-            USER_EDIT_STATE[user_id]["order_message_id"] = msg.id
-            logging.info(f"📌 Сохранён order_message_id: {msg.id} для {user_id}")
-        except Exception as e:
-            logging.error(f"Ошибка редактирования: {e}")
-            msg = await message_or_callback.message.reply_text(order_text, reply_markup=keyboard)
-            USER_EDIT_STATE[user_id]["order_message_id"] = msg.id
-            logging.info(f"📌 Новое сообщение: {msg.id}")
-    else:  # обычное сообщение
-        msg = await message_or_callback.reply_text(order_text, reply_markup=keyboard)
-        USER_EDIT_STATE[user_id]["order_message_id"] = msg.id
-        logging.info(f"📌 Первичное сообщение: {msg.id}")
+        else:
+            msg = await message_or_callback.reply_text(order_text, reply_markup=keyboard)
+            state["order_message_id"] = msg.id
+            ORDER_STATE[order_id]["order_message_id"] = msg.id
+            logging.info(f"🔗 Привязан order_id={order_id} к message_id={msg.id}")
+    except Exception as e:
+        logging.error(f"Ошибка отправки чека: {e}")
+
 
 def clean_street_name(s):
     """
@@ -757,23 +1658,23 @@ def clean_street_name(s):
     return s
 
 
-async def update_order_message(user_id, first_name):
-    """Редактирует уже отправленное сообщение с заказом."""
-    state = USER_EDIT_STATE.get(user_id)
+async def update_order_message(order_id):
+    state = ORDER_STATE.get(order_id)
     if not state:
         return
 
     message_id = state.get("order_message_id")
     if not message_id:
-        return  # нечего редактировать
+        return
 
     delivery_zone = state.get("delivery_zone")
     delivery_cost = state.get("delivery_price", 0)
     delivery_date = state.get("delivery_date")
 
     total = calculate_total(state["items"], delivery_price=delivery_cost)
+    status_emoji = "✅" if state.get("status") == "confirmed" else "⏳"
     order_text = (
-            f"📦 <b>Ваш заказ</b>\n"
+            f"{status_emoji} <b>Заказ</b>\n"
             f"📞 Телефон: {state['phone'] or 'не указан'}\n"
             f"⏰ Время: {state['time'] or 'не указано'}\n"
             + (f"📅 Дата: {delivery_date}\n" if delivery_date else "")
@@ -788,14 +1689,12 @@ async def update_order_message(user_id, first_name):
             f"\n\n💰 <b>Итого: {total} ₽</b>"
     )
 
-    keyboard = InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("➕ Добавить позицию", callback_data="add_item")],
-            [InlineKeyboardButton("➖ Убрать позицию", callback_data="remove_item")],
-            [InlineKeyboardButton("✏️ Редактировать заказ", callback_data="edit_order")],
-            [InlineKeyboardButton("✅ Подтвердить заказ", callback_data="confirm_order")]
-        ]
-    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🖨️ Печать чека", callback_data=f"print:{order_id}")]
+    ]) if state.get("status") == "confirmed" else InlineKeyboardMarkup([
+        [InlineKeyboardButton("✏️ Редактировать заказ", callback_data=f"edit_order:{order_id}")],
+        [InlineKeyboardButton("✅ Подтвердить заказ", callback_data=f"confirm_order:{order_id}")]
+    ])
 
     try:
         await bot_app.edit_message_text(
@@ -805,389 +1704,822 @@ async def update_order_message(user_id, first_name):
             reply_markup=keyboard
         )
     except Exception as e:
-        logging.error(f"Ошибка при редактировании сообщения: {e}")
+        logging.error(f"Ошибка при обновлении чека: {e}")
 
-def parse_external_order(text):
+
+def check_files():
+    for file_path in [ACTIVE_ORDERS_JSON, FUTURE_ORDERS_JSON, PENDING_ORDERS_JSON]:
+        if not os.path.exists(file_path):
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump([], f, ensure_ascii=False, indent=4)
+            logging.info(f"✅ Создан пустой файл: {file_path}")
+
+def format_order_details(order):
     """
-    Парсит заказ из my2can.com.
-    Возвращает словарь: {
-        items: [{"name", "qty", "comment", "source_price"}],
-        address: str,
-        phone: str,
-        delivery_time: None,
-        client_name: str
-    }
+    Форматирует детали заказа для отображения в Telegram.
     """
-    lines = text.strip().split('\n')
-    items = []
-    address = None
-    phone = None
-    client_name = "Клиент"
+    items_text = "\n".join(
+        [f"• {item['qty']}x {item['name']} — {item.get('source_price', 0) * item['qty']}₽"
+         for item in order.get("items", [])]
+    )
+    phone = order.get("phone") or "—"
+    address = order.get("address") or "—"
+    time_str = order.get("time") or "По готовности"
+    delivery_date = order.get("delivery_date", "—")
+    delivery_cost = order.get("delivery_price", 0)
+    total = order.get("total", 0)
 
-    i = 0
-    while i < len(lines):
-        line = lines[i].strip()
+    lines = [
+        f"📞 <b>Телефон:</b> <phone>{phone}</phone>",
+        f"🏠 <b>Адрес:</b> {address.capitalize()}",
+        f"⏰ <b>Время:</b> {time_str}",
+        f"📅 <b>Дата доставки:</b> <b>{delivery_date}</b>",
+        "",
+        f"📋 <b>Состав заказа:</b>",
+        items_text,
+        "",
+        f"🚚 <b>Доставка:</b> {delivery_cost}₽",
+        f"💰 <b>Итого:</b> <b>{total}₽</b>"
+    ]
 
-        # Имя клиента
-        if line.startswith("Клиент:"):
-            client_name = line.split(":", 1)[1].strip()
+    return "\n".join(lines)
 
-        # Телефон
-        elif line.startswith("Телефон:"):
-            digits = re.sub(r'\D', '', line)
-            if digits.startswith('8'):
-                digits = '7' + digits[1:]
-            phone = '+' + digits if len(digits) == 11 else None
+def move_future_to_active():
+    """Перемещает будущие заказы на сегодня в active_orders"""
+    today = datetime.now().strftime("%d.%m.%Y")
+    future_orders = load_future_orders()
+    updated_futures = []
 
-        # Адрес
-        elif line.startswith("Адрес:"):
-            addr_part = line.split(":", 1)[1].strip()
-            # Убираем регион и район, оставляем только город/село и улицу
-            if "сельское поселение" in addr_part.lower():
-                addr_part = re.sub(r'.*сельское поселение[^,]*,', '', addr_part, flags=re.IGNORECASE)
-            if "р-н." in addr_part or "район" in addr_part:
-                addr_part = re.sub(r'Томская обл\.[^,]*,', '', addr_part)
-                addr_part = re.sub(r'Парабельский р-н\.', '', addr_part)
-            addr_part = re.sub(r'село\s+', '', addr_part, flags=re.IGNORECASE)
-            addr_part = re.sub(r'дом', 'д.', addr_part, flags=re.IGNORECASE)
-            addr_part = re.sub(r'квартира', 'кв.', addr_part, flags=re.IGNORECASE)
-            addr_part = re.sub(r'\s+', ' ', addr_part).strip()
-            address = addr_part
+    moved_count = 0
+    for order in future_orders:
+        if order.get("delivery_date") == today:
+            add_active_order(order)
+            moved_count += 1
+            logging.info(f"🔄 Перемещён в активные: {order['id']}")
+        else:
+            updated_futures.append(order)
 
-        # Позиции
-        elif re.match(r'\d+\.\s*.+?-\s*\d+\s*ШТ\s*-\s*[\d\s,]+₽', line):
-            match = re.match(r'\d+\.\s*(.+?)\s*-\s*(\d+)\s*ШТ\s*-\s*([\d\s,]+)\s*₽', line)
-            if match:
-                name = match.group(1).strip()
-                qty = int(match.group(2))
-                price_str = match.group(3).replace(' ', '').replace(',', '.')
-                try:
-                    price_total = int(float(price_str))
-                except:
-                    price_total = 0
+    # Пересохраняем future_orders без сегодняшних
+    with open(FUTURE_ORDERS_JSON, "w", encoding="utf-8") as f:
+        json.dump(updated_futures, f, ensure_ascii=False, indent=4)
 
-                if "доставка" in name.lower():
-                    i += 1
-                    continue  # пропускаем как отдельную позицию
+    if moved_count:
+        logging.info(f"✅ {moved_count} будущих заказов перемещено в активные")
 
-                items.append({
-                    "name": name,
-                    "qty": qty,
-                    "comment": "",
-                    "source_price": price_total // qty if qty > 0 else 0
-                })
-
-        i += 1
-
-    return {
-        "items": items,
-        "address": address,
-        "phone": phone,
-        "delivery_time": None,
-        "client_name": client_name
-    }
-
-# --- Обработка кнопок редактирования ---
 @bot_app.on_callback_query()
 async def handle_callback(client, callback):
-    user_id = callback.from_user.id
     data = callback.data
+    user_id = callback.from_user.id
+    message = callback.message
+    global awaiting_edit_from_message
+    global ADMIN_MESSAGES
 
-    logging.info(f"🔔 Callback от {user_id}: {data}")
-    if user_id not in USER_EDIT_STATE:
-        logging.warning(f"⚠️ Нет состояния для пользователя {user_id}")
-    else:
-        logging.info(f"💬 Состояние найдено: {list(USER_EDIT_STATE[user_id].keys())}")
+    logging.info(f"📥 Получен callback: '{data}' от {user_id}")
 
-    if data.startswith("select_zone_"):
-        idx = int(data.replace("select_zone_", ""))
-        matches = USER_EDIT_STATE.get(user_id, {}).get("delivery_matches", [])
-        if 0 <= idx < len(matches):
-            zone, price, street_db = matches[idx]
-            USER_EDIT_STATE[user_id]["delivery_zone"] = zone
-            USER_EDIT_STATE[user_id]["delivery_price"] = price
-            first_name = callback.from_user.first_name
+    if data == "admin_active_orders":
 
-            # Удаляем сообщение с выбором зоны
-            zone_msg_id = USER_EDIT_STATE[user_id].get("zone_selection_message_id")
-            if zone_msg_id:
-                try:
-                    await bot_app.edit_message_text(
-                        chat_id=WORK_GROUP,
-                        message_id=zone_msg_id,
-                        text=f"✅ Выбрано: {zone}"
-                    )
-                except Exception as e:
-                    logging.error(f"Не удалось отредактировать: {e}")
+        # Удаляем предыдущие сообщения
+        for msg_id in ADMIN_MESSAGES:
+            try:
+                await bot_app.delete_messages(callback.message.chat.id, msg_id)
+                logging.info(f"🗑️ Удалено админ-сообщение: {msg_id}")
+            except Exception as e:
+                logging.warning(f"Не удалось удалить сообщение {msg_id}: {e}")
+        ADMIN_MESSAGES.clear()
 
-            # Обновляем основное сообщение с заказом
-            await show_editable_order_inline(callback, first_name)
-            await callback.answer(f"Зона выбрана: {zone}")
-        else:
-            await callback.answer("❌ Неверный выбор.")
-
-    elif data == "edit_order":
-        user_id = callback.from_user.id
-        state = USER_EDIT_STATE.get(user_id)
-        if not state:
-            await callback.answer("❌ Сессия истекла.")
+        active_orders = [
+            o for o in load_active_orders()
+            if o.get("status") not in ["delivered", "cancelled"]
+        ]
+        if not active_orders:
+            await callback.answer("📭 Нет активных заказов")
             return
 
-        # Включаем режим редактирования
-        state["awaiting_edit_order"] = True
-        state["awaiting"] = None  # выключаем другие ожидания
+        for order in active_orders:
+            order_id = order.get("id", "б/н")
+            addr = order.get("address")
+            if isinstance(addr, dict):
+                street = addr.get("street", "").strip()
+                house = addr.get("house", "").strip()
+                addr = f"{street} {house}".strip()
+            elif not addr:
+                addr = "Самовывоз"
+            else:
+                addr = str(addr).strip()
 
+            phone = order.get("phone") or "—"
+            total = order.get("total", 0)
+            time_order = (order.get("time") or "По готовности").strip()
+            phone_last_4 = phone[-4:] if len(phone) >= 4 else "—"
+
+            text = (
+                f"📦 <b>Заказ #{order_id}</b>\n"
+                f"⏰ <b>Время:</b> {time_order}\n"
+                f"🏠 <b>Адрес:</b> {addr}\n"
+                f"📞 <b>Тел:</b> ...{phone_last_4}\n"
+                f"💰 <b>Сумма:</b> {total} ₽"
+            )
+
+            keyboard = InlineKeyboardMarkup(
+                [
+                    [InlineKeyboardButton("👁️ Посмотреть", callback_data=f"view_active_order_{order_id}")],
+                    [
+                        InlineKeyboardButton("✅ Готов", callback_data=f"order_ready_{order_id}"),
+                        InlineKeyboardButton("❌ Отмена", callback_data=f"cancel_order:{order_id}")
+                    ]
+                ]
+            )
+            try:
+                sent_msg = await bot_app.send_message(
+                    chat_id=callback.message.chat.id,
+                    text=text,
+                    reply_markup=keyboard,
+                    message_thread_id=THREAD_NOW_ID
+                )
+                ADMIN_MESSAGES.append(sent_msg.id)
+            except Exception as e:
+                logging.error(f"❌ Ошибка отправки заказа {order_id}: {e}")
+
+        await callback.answer()
+        return
+
+    elif data == "admin_future_orders":
+        for msg_id in ADMIN_MESSAGES:
+            try:
+                await bot_app.delete_messages(callback.message.chat.id, msg_id)
+                logging.info(f"🗑️ Удалено админ-сообщение: {msg_id}")
+            except Exception as e:
+                logging.warning(f"Не удалось удалить сообщение {msg_id}: {e}")
+        ADMIN_MESSAGES.clear()
+
+        future_orders = load_future_orders()
+        if not future_orders:
+            await callback.answer("📭 Нет будущих заказов")
+            return
+
+        keyboard = []
+        today_str = datetime.now().strftime("%d.%m.%Y")
+        for order in future_orders:
+            delivery_date = order.get("delivery_date")
+            if not delivery_date or delivery_date <= today_str:
+                continue
+
+            order_id = order.get("id", "б/н")
+            addr = (order.get("address") or "Самовывоз")[:15].strip()
+            phone = order.get("phone") or "—"
+            date_str = delivery_date
+            total = order.get("total", 0)
+            phone_last_4 = phone[-4:] if len(phone) >= 4 else "—"
+            btn_text = f"📅 {date_str} | {addr}... | {phone_last_4} | {total}₽"
+            keyboard.append([
+                InlineKeyboardButton(btn_text, callback_data=f"view_future_order_{order_id}")
+            ])
+
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back_to_menu")])
         try:
-            await callback.message.edit_text("✏️ Отправьте текст с изменениями:\n\n"
-                                             "- Добавьте новые блюда (например: `2 Лава Креветка`)\n"
-                                             "- Укажите новый телефон, время или адрес\n"
-                                             "- Можно всё вместе")
-            await callback.answer()
+            sent_msg = await message.edit_text("<b>📅 Заказы в будущем</b>\nВыберите заказ:", reply_markup=InlineKeyboardMarkup(keyboard))
+            ADMIN_MESSAGES.append(sent_msg.id)
         except Exception as e:
             logging.error(f"❌ Ошибка при редактировании: {e}")
-            await callback.answer("Ошибка интерфейса.")
 
-    elif data == "confirm_order":
-        state = USER_EDIT_STATE.get(user_id)
-        if not state:
-            await callback.answer("Заказ не найден.")
-            return
+        await callback.answer()
+        return
 
-        first_name = callback.from_user.first_name
-        total = calculate_total(state["items"], delivery_price=state.get("delivery_price", 0))
-
-        order_text = (
-                f"📦 <b>Новый заказ</b>\n"
-                f"👤 {first_name}\n"
-                f"📞 {state['phone']}\n"
-                f"⏰ {state['time']}\n"
-                f"📅 {state.get('delivery_date', 'Сегодня')}\n"
-                f"🏠 {state['address']}\n"
-                f"📍 Район: {state['delivery_zone'].capitalize() if state['delivery_zone'] else 'Не указан'}\n"
-                f"🚚 Доставка: {state.get('delivery_price', 0)} ₽\n\n"
-                f"🍣 Блюда:\n" + "\n".join([
-            f"• {it['qty']}x {it['name']}" + (f" {it['comment']}" if it['comment'] else "")
-            for it in state["items"]
-        ]) +
-                f"\n\n💰 Итого: {total} ₽"
-        )
-
-        # Отправляем в рабочую группу
-        try:
-            await bot_app.send_message(chat_id=WORK_GROUP, text=order_text)
-            await callback.edit_message_text("✅ Заказ подтверждён и отправлен!")
-        except Exception as e:
-            await callback.edit_message_text("❌ Ошибка отправки заказа.")
-            logging.error(f"Ошибка отправки заказа: {e}")
-            return
-
-        # === Определяем дату доставки ===
-        delivery_date_str = state.get("delivery_date")
+    elif data == "admin_delivered_today":
+        orders = load_active_orders()
         today_str = datetime.now().strftime("%d.%m.%Y")
 
-        is_today = delivery_date_str == today_str or not delivery_date_str
+        delivered_today = [
+            o for o in orders
+            if o.get("status") == "delivered"
+               and (
+                       o.get("delivery_date") == today_str
+                       or o.get("delivery_date") is None  # если не указана — считаем как "сегодня"
+               )
+        ]
 
-        # === Формируем объект заказа ===
-        order_obj = {
-            "user_id": user_id,
-            "client_name": first_name,
+        if not delivered_today:
+            await callback.answer("📭 Нет выполненных заказов за сегодня")
+            return
+
+        keyboard = []
+        for order in delivered_today:
+            order_id = order.get("id", "б/н")
+            addr = (order.get("address") or "Самовывоз").strip()[:15]
+            phone = order.get("phone") or "—"
+            total = order.get("total", 0)
+            phone_last_4 = phone[-4:] if len(phone) >= 4 else "—"
+            btn_text = f"{addr}... | {phone_last_4} | {total}₽"
+            keyboard.append([
+                InlineKeyboardButton(
+                    btn_text,
+                    callback_data=f"view_delivered_order_{order_id}"
+                )
+            ])
+
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back_to_menu")])
+        await message.edit_text("<b>✅ Выполненные заказы за сегодня</b>\nВыберите заказ для просмотра:", reply_markup=InlineKeyboardMarkup(keyboard))
+        await callback.answer()
+
+    elif data.startswith("view_active_order_"):
+        order_id = data.replace("view_active_order_", "")
+        order = next((o for o in load_active_orders() if str(o.get("id")) == order_id), None)
+        if not order:
+            await callback.answer("❌ Заказ не найден")
+            return
+
+        text = format_order_details(order)
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Готов", callback_data=f"order_ready_{order_id}")],
+            [InlineKeyboardButton("⬅️ Назад", callback_data="admin_active_orders")]
+        ])
+        await message.edit_text(text, reply_markup=keyboard)
+        await callback.answer()
+        return
+
+    elif data == "admin_salary":
+        active_orders = load_active_orders()
+        future_orders = load_future_orders()
+        today_str = datetime.now().strftime("%d.%m.%Y")
+        today_future_orders = [o for o in future_orders if o.get("delivery_date") == today_str]
+
+        # 💰 Все активные заказы (включая "готов", "в пути") + будущие на сегодня
+        total_active = sum(o["total"] for o in active_orders)
+        total_today_future = sum(o["total"] for o in today_future_orders)
+        total_all = total_active + total_today_future
+
+        # 🚚 Доход с доставки
+        delivery_income = (
+                sum(o.get("delivery_price", 0) for o in active_orders) +
+                sum(o.get("delivery_price", 0) for o in today_future_orders)
+        )
+
+        # 🍣 Чистый доход с блюд (без учёта доставки)
+        food_income = total_all - delivery_income
+
+        # 📊 Статистика
+        count_all = len(active_orders) + len(today_future_orders)
+        avg_check = food_income // count_all if count_all else 0
+
+        text = dedent(f"""
+            <b>💰 Расчёт выручки (зарплата)</b>
+
+            📦 Активные заказы: <b>{total_active:,} ₽</b>
+            📅 Будущие заказы: <b>{total_today_future:,} ₽</b>
+
+            🍣 <b>Выручка:</b> <code>{food_income:,} ₽</code>
+            🚚 <b>Доставка:</b> <code>{delivery_income:,} ₽</code>
+            
+            📊 Средний чек (без доставки): <b>{avg_check:,} ₽</b>
+            📌 Всего заказов: <b>{count_all}</b>
+
+            💰 Зарплата: <b>{food_income / 8:.2f} ₽</b>
+        """).strip()
+
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_menu")]])
+        await message.edit_text(text, reply_markup=keyboard)
+        await callback.answer()
+        return
+
+    elif data.startswith("send_to_group:"):
+        order_id = data.replace("send_to_group:", "")
+        state = ORDER_STATE.get(order_id)
+        if not state:
+            await callback.answer("❌ Заказ не найден.")
+            return
+
+        # Формируем текст чека
+        delivery_zone = state.get("delivery_zone")
+        delivery_cost = state.get("delivery_price", 0)
+        delivery_date = state.get("delivery_date")
+
+        total = calculate_total(state["items"], delivery_price=delivery_cost)
+        status_emoji = "⏳"
+        order_text = (
+                f"{status_emoji} <b>Заказ</b>\n"
+                f"📞 Телефон: {state['phone'] or 'не указан'}\n"
+                f"⏰ Время: {state['time'] or 'не указано'}\n"
+                + (f"📅 Дата: {delivery_date}\n" if delivery_date else "")
+                + f"🏠 Адрес: {state['address'] or 'не указан'}\n"
+                  f"📍 Зона: {delivery_zone if delivery_zone else 'Не определена'}\n"
+                  f"🚚 Доставка: {delivery_cost} ₽\n\n"
+                  f"🍣 Блюда:\n" + "\n".join([
+            f"• {it['qty']}x {it['name']} — {it['qty'] * it.get('source_price', 0)} ₽"
+            + (f"\n  ⚠️ {it['comment'].capitalize()}" if it['comment'] else "")
+            for it in state["items"]
+        ]) +
+                f"\n\n💰 <b>Итого: {total} ₽</b>"
+        )
+
+        # Кнопки для группы
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Подтвердить заказ", callback_data=f"confirm_order:{order_id}")],
+            [InlineKeyboardButton("❌ Отменить заказ", callback_data=f"cancel_order:{order_id}")]
+        ])
+
+        try:
+            # Отправляем в группу
+            sent_message = await bot_app.send_message(
+                chat_id=WORK_GROUP,
+                text=order_text,
+                reply_markup=keyboard,
+                message_thread_id=THREAD_ORDER_ID  # если нужно в тред
+            )
+
+            # Сохраняем ID сообщения
+            state["order_message_id"] = sent_message.id
+            ORDER_STATE[order_id]["order_message_id"] = sent_message.id
+
+            # Редактируем оригинальное сообщение в личке
+            await callback.message.edit_text(
+                callback.message.text.html + "\n\n📤 <b>Заказ отправлен в группу.</b>",
+                reply_markup=None
+            )
+
+            await callback.answer("✅ Заказ отправлен в группу!")
+            logging.info(f"📤 Заказ {order_id} отправлен в группу: message_id={sent_message.id}")
+        except Exception as e:
+            logging.error(f"❌ Ошибка при отправке в группу: {e}")
+            await callback.answer("❌ Не удалось отправить заказ в группу.")
+        return
+
+    elif data == "back_to_menu":
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📦 Активные заказы", callback_data="admin_active_orders"),
+             InlineKeyboardButton("📅 Заказы в будущем", callback_data="admin_future_orders")],
+            [InlineKeyboardButton("💰 Зарплата", callback_data="admin_salary")],
+            [InlineKeyboardButton("✅ Выполненные за сегодня", callback_data="admin_delivered_today")]  # ✅ Новая кнопка
+        ])
+        await message.edit_text("👨‍💼 <b>Админ-меню</b>\nВыберите действие:", reply_markup=keyboard)
+        await callback.answer()
+        return
+
+    elif data.startswith("view_future_order_"):
+        order_id = data.replace("view_future_order_", "")
+        order = next((o for o in load_future_orders() if str(o.get("id")) == order_id), None)
+        if not order:
+            await callback.answer("❌ Заказ не найден")
+            return
+
+        text = format_order_details(order)
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🖨️ Печать чека", callback_data=f"print_future_{order_id}")],
+            [InlineKeyboardButton("⬅️ Назад", callback_data="admin_future_orders")]
+        ])
+        await message.edit_text(text, reply_markup=keyboard)
+        await callback.answer()
+        return
+
+    elif data.startswith("view_delivered_order_"):
+        order_id = data.replace("view_delivered_order_", "")
+        orders = load_active_orders()
+        order = next((o for o in orders if str(o.get("id")) == order_id and o.get("status") == "delivered"), None)
+        if not order:
+            await callback.answer("❌ Заказ не найден")
+            return
+
+        text = format_order_details(order)
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Назад", callback_data="admin_delivered_today")]
+        ])
+        await message.edit_text(text, reply_markup=keyboard)
+        await callback.answer()
+        return
+
+    elif data.startswith("order_ready_"):
+        order_id = data.replace("order_ready_", "")
+        orders = load_active_orders()
+        target_order = None
+        updated = False
+        for o in orders:
+            if str(o.get("id")) == order_id:
+                o["status"] = "ready"
+                save_active_orders(orders)
+                target_order = o  # ✅ Присваиваем найденный заказ
+                updated = True
+                break
+        if updated:
+            await callback.answer("✅ Статус обновлён: готов")
+            await message.edit_reply_markup(reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Назад", callback_data="admin_active_orders")]
+            ]))
+        else:
+            await callback.answer("❌ Заказ не найден")
+            return
+
+        items_text = "\n".join(
+            [f"• {item['qty']}x {item['name']}" for item in target_order.get("items", [])]
+        )
+        phone = target_order.get("phone") or "—"
+        address = target_order.get("address") or "Самовывоз"
+        time_str = target_order.get("time") or "По готовности"
+        delivery_zone = target_order.get("delivery_zone", "—")
+        total = target_order.get("total", 0)
+
+        delivery_message = f"""
+📦 <b>Заказ готов к выдаче!</b>
+
+📞 <b>Телефон:</b> <phone>{phone}</phone>
+🏠 <b>Адрес:</b> {address.capitalize()}
+⏰ <b>Время:</b> {time_str}
+📍 <b>Район:</b> {delivery_zone}
+
+📋 <b>Состав:</b>
+{items_text}
+
+💰 <b>Итого:</b> <b>{total} ₽</b>
+        """.strip()
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Выдан", callback_data=f"order_delivered_{order_id}")],
+            [InlineKeyboardButton("⬅️ Назад", callback_data="admin_active_orders")]
+        ])
+
+        try:
+            await bot_app.send_message(
+                chat_id=WORK_GROUP,
+                reply_to_message_id=THREAD_DELIVERY_ID,
+                text=delivery_message,
+                reply_markup=keyboard
+            )
+        except Exception as e:
+            logging.error(f"❌ Не удалось отправить сообщение в группу доставки: {e}")
+
+
+    elif data.startswith("order_delivered_"):
+        order_id = data.replace("order_delivered_", "")
+        orders = load_active_orders()
+        for o in orders:
+            if str(o.get("id")) == order_id:
+                o["status"] = "delivered"
+                save_active_orders(orders)
+                break
+        save_active_orders(orders)
+        await callback.answer("🗑️ Заказ удалён")
+        await message.delete()
+        return
+
+    elif data.startswith("print_future_"):
+        order_id = data.replace("print_future_", "")
+        order = next((o for o in load_future_orders() if str(o.get("id")) == order_id), None)
+        if not order:
+            await callback.answer("❌ Заказ не найден")
+            return
+        print_receipt_html(order)
+        await callback.answer("🖨️ Чек отправлен на печать")
+        return
+
+
+    elif data.startswith("edit_order:"):
+        # Ищем order_id по message.id (ID самого чека)
+        order_id = None
+        for oid, state in ORDER_STATE.items():
+            if state.get("order_message_id") == callback.message.id:
+                order_id = oid
+                break
+
+        if not order_id:
+            await callback.answer("❌ Не удалось найти заказ.")
+            return
+
+        # ✅ Устанавливаем ожидание СЛЕДУЮЩЕГО сообщения
+        global awaiting_edit_from_message
+        awaiting_edit_from_message = order_id
+
+        # Меняем текст чека
+        try:
+            await callback.message.edit_text(
+                "✏️ <b>Режим редактирования</b>\n\n"
+                "Отправьте текст с изменениями (не обязательно как ответ):\n"
+                "- Добавьте/удалите блюда\n"
+                "- Обновите адрес, телефон, время",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🚫 Отменить", callback_data="cancel_edit")]
+                ])
+            )
+            logging.info(f"🔄 Ожидание редактирования через следующее сообщение: {order_id}")
+        except Exception as e:
+            logging.error(f"Ошибка при активации редактирования: {e}")
+
+        await callback.answer()
+
+    elif data.startswith("confirm_order:"):
+        order_id = data.replace("confirm_order:", "")
+        state = ORDER_STATE.get(order_id)
+        if not state:
+            await callback.answer("❌ Заказ не найден.")
+            return
+
+        # Удаляем из pending_orders
+        pending_orders = load_pending_orders()
+        if order_id in pending_orders:
+            del pending_orders[order_id]
+            save_pending_orders(pending_orders)
+            logging.info(f"🗑️ Удалён из pending_orders: {order_id}")
+
+        # Определяем дату доставки
+        today = datetime.now().strftime("%d.%m.%Y")
+        if not state.get("delivery_date"):
+            state["delivery_date"] = today
+        delivery_date = state["delivery_date"]
+
+        total = calculate_total(state["items"], delivery_price=state.get("delivery_price", 0))
+
+        saved_order = {
+            "id": order_id,
+            "items": state["items"],
             "phone": state["phone"],
             "address": state["address"],
             "time": state["time"],
-            "delivery_date": delivery_date_str or today_str,
+            "delivery_date": delivery_date,
             "delivery_zone": state["delivery_zone"],
-            "delivery_price": state.get("delivery_price", 0),
-            "items": state["items"],
+            "delivery_price": state["delivery_price"],
             "total": total,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "status": "accepted",
+            "created_at": datetime.now().isoformat()
         }
 
-        # === Сохраняем в нужную базу ===
-        if is_today:
+        # === ✅ ШАГ 1: Добавляем в JSON (активные / будущие) ===
+        if delivery_date == today:
+            add_active_order(saved_order)
+            logging.info(f"📥 Заказ {order_id} добавлен в активные")
+        else:
+            add_future_order(saved_order)
+            logging.info(f"📅 Заказ {order_id} добавлен в будущие")
+
+        # === ✅ ШАГ 2: Формируем текст сообщения для треда ===
+        addr = state["address"]
+        if isinstance(addr, dict):
+            street = addr.get("street", "").strip()
+            house = addr.get("house", "").strip()
+            addr = f"{street} {house}".strip()
+        elif not addr:
+            addr = "Самовывоз"
+
+        phone = state["phone"]
+        time_order = state["time"] or "По готовности"
+        phone_last_4 = phone[-4:] if len(phone) >= 4 else "—"
+
+        text = (
+            f"📦 <b>Заказ #{order_id}</b>\n"
+            f"⏰ <b>Время:</b> {time_order}\n"
+            f"🏠 <b>Адрес:</b> {addr}\n"
+            f"📞 <b>Тел:</b> ...{phone_last_4}\n"
+            f"💰 <b>Сумма:</b> {total} ₽"
+        )
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("👁️ Посмотреть", callback_data=f"view_active_order_{order_id}")],
+            [
+                InlineKeyboardButton("✅ Готов", callback_data=f"order_ready_{order_id}"),
+                InlineKeyboardButton("❌ Отмена", callback_data=f"cancel_order:{order_id}")
+            ]
+        ])
+
+        # === ✅ ШАГ 3: Отправляем в тред активных заказов (THREAD_NOW_ID) ===
+        try:
+            sent_msg = await bot_app.send_message(
+                chat_id=WORK_GROUP,
+                text=text,
+                reply_markup=keyboard,
+                message_thread_id=THREAD_NOW_ID
+            )
+            logging.info(f"📤 Заказ {order_id} отправлен в тред активных заказов (ID: {sent_msg.id})")
+        except Exception as e:
+            logging.error(f"❌ Не удалось отправить заказ {order_id} в THREAD_NOW_ID: {e}")
+
+        # === ✅ ШАГ 4: Удаляем из старого треда (THREAD_ORDER_ID) ===
+        try:
+            await bot_app.delete_messages(WORK_GROUP, state["order_message_id"])
+            logging.info(f"🗑️ Удалён из треда заказов: {state['order_message_id']}")
+        except Exception as e:
+            logging.warning(f"❌ Не удалось удалить сообщение {state['order_message_id']}: {e}")
+
+        # === ✅ ШАГ 5: Обновляем статус в интерфейсе и уведомляем админа ===
+        state["status"] = "accepted"
+        await update_order_message(order_id)
+
+        await callback.answer("✅ Заказ принят и перенесён в активные")
+
+        # === ✅ Уведомление пользователю (как было) ===
+        user_id = None
+        for uid, phone in USER_PHONE_MAP.items():
+            if phone == state["phone"]:
+                user_id = uid
+                break
+
+        if user_id:
+            try:
+                await bot_app.send_message(
+                    chat_id=user_id,
+                    text="✅ Ваш заказ подтверждён и передан в работу!\n\n"
+                         "Мы свяжемся с вами при необходимости 📞"
+                )
+            except Exception as e:
+                logging.error(f"❌ Не удалось отправить уведомление: {e}")
+
+        return
+
+    elif data.startswith("select_zone_"):
+        zone_idx = int(data.split("_")[-1])
+        logging.info(f"🔍 Обработка выбора зоны: message_id={callback.message.id}, zone_idx={zone_idx}")
+
+        order_id = None
+        for oid, state in ORDER_STATE.items():
+            if state.get("zone_selection_message_id") == callback.message.id:
+                order_id = oid
+                break
+
+        if not order_id:
+            await callback.answer("❌ Не удалось найти заказ.")
+            logging.warning(f"⚠️ Не найден order_id для message_id={callback.message.id}")
+            return
+
+        state = ORDER_STATE[order_id]
+        matches = state.get("delivery_matches", [])
+        if not matches:
+            await callback.answer("❌ Нет доступных зон доставки.")
+            return
+
+        if 0 <= zone_idx < len(matches):
+            zone, price, street_db = matches[zone_idx]
+            state["delivery_zone"] = zone
+            state["delivery_price"] = price
+            # Сохраняем район и цену
+            state["delivery_zone"] = zone
+            state["delivery_price"] = price
+
+            # Восстанавливаем оригинальный адрес с номером дома
+            if state.get("original_address"):
+                state["address"] = state["original_address"]
+            else:
+                state["address"] = f"{street_db}, {state['address'].split()[-1]}"  # попытка восстановить дом
+
+            logging.info(f"📍 Выбрана зона: {zone} → {price} ₽")
+
+            # Удаляем сообщение с выбором
+            if state.get("zone_selection_message_id"):
+                try:
+                    await bot_app.delete_messages(WORK_GROUP, state["zone_selection_message_id"])
+                    logging.info(f"🗑️ Удалено сообщение с выбором: {state['zone_selection_message_id']}")
+                except Exception as e:
+                    logging.error(f"❌ Не удалось удалить сообщение: {e}")
+                state["zone_selection_message_id"] = None
+
+            # Сохраняем в pending_orders.json
+            update_pending_order_in_file(order_id, state)
+
+            # Обновляем чек
+            await update_order_message(order_id)
+            await callback.answer(f"✅ Зона выбрана: {zone} (+{price} ₽)")
+        else:
+            await callback.answer("❌ Неверная зона.")
+        return
+
+    # === ОБЩИЙ ПАРСИНГ ДАННЫХ ЧЕРЕЗ ":" (после всех конкретных случаев) ===
+    elif ":" in data:
+        try:
+            action, order_id = data.split(":", 1)
+        except ValueError:
+            await callback.answer("❌ Ошибка: неверные данные.")
+            return
+
+        if action == "cancel_order":
+            state = ORDER_STATE.get(order_id)
+            pending_orders = load_pending_orders()
             active_orders = load_active_orders()
-            active_orders.append(order_obj)
-            save_active_orders(active_orders)
-            logging.info(f"✅ Активный заказ сохранён: {order_obj['phone']}")
-        else:
             future_orders = load_future_orders()
-            future_orders.append(order_obj)
-            save_future_orders(future_orders)
-            logging.info(f"📅 Будущий заказ сохранён: {order_obj['delivery_date']} | {order_obj['phone']}")
 
-        # === Печать чека только если сегодня ===
-        if is_today:
+            # Флаг: найден ли заказ
+            found = False
+            updated = False
+
+            # --- 1. Обновляем в ORDER_STATE ---
+            if order_id in ORDER_STATE:
+                ORDER_STATE[order_id]["status"] = "cancelled"
+                found = True
+
+            # --- 2. Обновляем в pending_orders.json ---
+            if str(order_id) in pending_orders:
+                pending_orders[str(order_id)]["status"] = "cancelled"
+                save_pending_orders(pending_orders)
+                found = True
+
+            # --- 3. Обновляем в active_orders.json ---
+            for order in active_orders:
+                if str(order.get("id")) == str(order_id):
+                    order["status"] = "cancelled"
+                    save_active_orders(active_orders)
+                    found = True
+                    updated = True
+                    break
+
+            # --- 4. Обновляем в future_orders.json ---
+            for order in future_orders:
+                if str(order.get("id")) == str(order_id):
+                    order["status"] = "cancelled"
+                    save_future_orders(future_orders)
+                    found = True
+                    updated = True
+                    break
+
+            # --- Редактируем сообщение ---
             try:
-                print_receipt_html(state)
-                await callback.message.reply("🖨️ Чек отправлен на печать!")
+                await callback.message.edit_text(
+                    callback.message.text.html + "\n\n🚫 <b>Заказ отменён.</b>",
+                    reply_markup=None
+                )
             except Exception as e:
-                logging.error(f"❌ Ошибка печати при подтверждении: {e}")
+                logging.warning(f"Не удалось редактировать сообщение: {e}")
+
+            # --- Ответ ---
+            if found:
+                if updated:
+                    await callback.answer("✅ Заказ отменён")
+                    logging.info(f"✅ Заказ отмечен как отменённый: {order_id}")
+                else:
+                    await callback.answer("✅ Заказ уже был отменён")
+            else:
+                await callback.answer("❌ Заказ не найден")
+
+            return
+
         else:
-            try:
-                # Генерируем текст чека
-                receipt_text = generate_receipt_text(state)
+            await callback.answer("❌ Неизвестное действие.")
+            return
 
-                # Клавиатура с кнопкой печати
-                keyboard = InlineKeyboardMarkup(
-                    [
-                        [InlineKeyboardButton("🖨️ Распечатать чек", callback_data=f"print_future_{user_id}")]
-                    ]
-                )
+    elif data == "cancel_edit":
+        awaiting_edit_from_message = None  # ✅ Сброс
 
-                # Формируем красивый HTML-чек
-                html_receipt = (
-                    f"<b>📄 {state.get('delivery_date', 'Сегодня')} {state['time']}</b>\n"
-                    f"────────────────────────\n"
-                    f"📞 <a href='tel:{state['phone']}'>Номер телефона: {state['phone']}</a>\n"
-                    f"🏠 Адрес: <code>{state['address']}</code>\n"
-                    f"⏰ Время доставки: <b>{state['time']}</b>\n"
-                    f"📅 Дата: <b>{state.get('delivery_date', 'Сегодня')}</b>\n"
-                    f"📍 Район: <i>{state['delivery_zone'].capitalize() if state['delivery_zone'] else 'Не указан'}</i>\n"
-                    f"🚚 Доставка: <b>{state.get('delivery_price', 0):,} ₽</b>\n"
-                    f"────────────────────────\n"
-                    f"<b>📋 СОСТАВ ЗАКАЗА:</b>\n"
-                )
+        order_id = None
+        for oid, state in ORDER_STATE.items():
+            if state.get("order_message_id") == callback.message.id:
+                order_id = oid
+                break
 
-                for idx, item in enumerate(state["items"], start=1):
-                    name = item["name"]
-                    qty = item["qty"]
-                    comment = item["comment"] if item["comment"] else ""
-                    price_per_unit = item.get("source_price")
-                    if price_per_unit is None:
-                        menu_item = next((i for i in MENU_ITEMS if i["name"] == item["name"]), None)
-                        price_per_unit = menu_item["price"] if menu_item else 0
-                    line_total = price_per_unit * qty
+        if order_id and order_id in ORDER_STATE:
+            ORDER_STATE[order_id]["awaiting_edit_order"] = False
 
-                    html_receipt += (
-                        f"\n<b>{idx}. {name}</b> ×{qty}\n"
-                        f"   💰 <i>{line_total:,} ₽</i>"
-                    )
-                    if comment:
-                        html_receipt += f"   ⚠️ <s>{comment}</s>"
-
-                total = calculate_total(state["items"], delivery_price=state.get("delivery_price", 0))
-                html_receipt += (
-                    f"\n────────────────────────\n"
-                    f"💸 <b>ИТОГО: {total:,} ₽</b>\n"
-                    f"────────────────────────\n"
-                )
-
-
-                # Отправляем чек с кнопкой
-                msg = await bot_app.send_message(
-                    chat_id=WORK_GROUP,
-                    reply_to_message_id=THREAD_FUTURE_ID,
-                    text=f"{html_receipt}",
-                    reply_markup=keyboard
-                )
-                logging.info(f"📄 Чек с кнопкой отправлен в топик 'Будущие' (ID: {msg.id})")
-            except Exception as e:
-                logging.error(f"❌ Ошибка отправки чека в Telegram: {e}")
-
-        # === Удаляем из состояния ===
-        del USER_EDIT_STATE[user_id]
-
-        # === Обновляем историю пользователя ===
-        orders = load_orders()
-        user_orders = orders.get(str(user_id), [])
-        user_orders.append(order_obj)
-        orders[str(user_id)] = user_orders
-        save_orders(orders)
-
-    elif data == "add_item":
-        user_id = callback.from_user.id
-        if user_id not in USER_EDIT_STATE:
-            initialize_user_state(user_id)
-
-        # ✅ Очищаем temp_cart при открытии меню добавления
-        USER_EDIT_STATE[user_id]["temp_cart"] = []
-
-        await show_categories(callback)
-        await callback.answer()
+        await update_order_message(order_id)
+        await callback.answer("Редактирование отменено")
+        return
 
     elif data == "remove_item":
-        user_id = callback.from_user.id
-        if user_id not in USER_EDIT_STATE:
-            initialize_user_state(user_id)
-        state = USER_EDIT_STATE[user_id]
-
+        order_id = callback.message.id
+        state = ORDER_STATE.get(order_id)
+        if not state:
+            await callback.answer("❌ Сессия истекла")
+            return
         if not state.get("items"):
             await callback.answer("В заказе нет блюд.")
             return
-
-        # Показываем текущие позиции с количеством
         keyboard = []
         for item in state["items"]:
             label = f"{item['name']} (x{item['qty']})"
-            keyboard.append([InlineKeyboardButton(label, callback_data=f"remove_{item['name']}")])
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"remove_{item['name']}_{order_id}")])
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_order")])
         reply_markup = InlineKeyboardMarkup(keyboard)
-
         try:
             await callback.message.edit_text("Выберите позицию для удаления:", reply_markup=reply_markup)
             await callback.answer()
         except Exception as e:
             logging.error(f"❌ Ошибка при открытии удаления: {e}")
-            await callback.answer("Ошибка открытия меню удаления")
 
     elif data.startswith("remove_"):
-        user_id = callback.from_user.id
-        item_name = data.replace("remove_", "")
-        state = USER_EDIT_STATE.get(user_id)
+        parts = data.split("_")
+        if len(parts) < 3:
+            await callback.answer("❌ Неверный формат")
+            return
+        item_name = "_".join(parts[1:-1])
+        order_id = parts[-1]
+        state = ORDER_STATE.get(order_id)
         if not state:
             await callback.answer("❌ Сессия истекла")
             return
-
-        items = state["items"]
-        item = next((it for it in items if it["name"] == item_name), None)
+        item = next((it for it in state["items"] if it["name"] == item_name), None)
         if not item:
             await callback.answer("Позиция не найдена.")
             return
-
         if item["qty"] > 1:
             item["qty"] -= 1
             await callback.answer(f"➖ Уменьшено: {item_name} (осталось x{item['qty']})")
         else:
-            items.remove(item)
+            state["items"].remove(item)
             await callback.answer(f"🗑️ Удалено: {item_name}")
-
-        # Обновляем основное сообщение с заказом
-        first_name = callback.from_user.first_name
-        await update_order_message(user_id, first_name)
-
-        # ⬇️ ВАЖНО: перерисовываем и меню удаления!
-        if items:  # если ещё есть позиции
-            keyboard = []
-            for it in items:
-                label = f"{it['name']} (x{it['qty']})"
-                keyboard.append([InlineKeyboardButton(label, callback_data=f"remove_{it['name']}")])
-            keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_order")])
-            reply_markup = InlineKeyboardMarkup(keyboard)
-
-            try:
-                await callback.message.edit_text("Выберите позицию для удаления:", reply_markup=reply_markup)
-            except Exception as e:
-                if "message is not modified" not in str(e).lower():
-                    logging.error(f"❌ Ошибка при обновлении меню удаления: {e}")
-        else:
-            # Если больше нет позиций — возвращаемся к заказу
-            try:
-                await callback.message.edit_text("✅ Все позиции удалены.", reply_markup=None)
-                await asyncio.sleep(1)
-                await update_order_message(user_id, first_name)
-            except Exception as e:
-                logging.error(f"❌ Ошибка при выходе из удаления: {e}")
-
+        await update_order_message(order_id)
 
     elif data == "back_to_order":
-        user_id = callback.from_user.id
-        first_name = callback.from_user.first_name
-        await update_order_message(user_id, first_name)
+        order_id = callback.message.id
+        await update_order_message(order_id)
         await callback.answer()
 
     elif data.startswith("cat_"):
         category = data.replace("cat_", "")
-        USER_EDIT_STATE[user_id]["last_category"] = category
-        await show_dishes_by_category(user_id, category)
+        order_id = callback.message.id
+        if order_id not in ORDER_STATE:
+            initialize_user_state(order_id)
+        ORDER_STATE[order_id]["last_category"] = category
+        await show_dishes_by_category(order_id, category)
         await callback.answer()
 
     elif data.startswith("add_"):
@@ -1196,47 +2528,41 @@ async def handle_callback(client, callback):
         except ValueError:
             await callback.answer("❌ Неверный ID блюда")
             return
-
         item = next((it for it in MENU_ITEMS if it["id"] == item_id), None)
         if not item:
             await callback.answer("❌ Блюдо не найдено")
             return
-
-        user_id = callback.from_user.id
-        if user_id not in USER_EDIT_STATE:
-            initialize_user_state(user_id)
-
-        temp_cart = USER_EDIT_STATE[user_id]["temp_cart"]
+        order_id = callback.message.id
+        if order_id not in ORDER_STATE:
+            initialize_user_state(order_id)
+        temp_cart = ORDER_STATE[order_id]["temp_cart"]
         existing = next((it for it in temp_cart if it["name"] == item["name"]), None)
         if existing:
             existing["qty"] += 1
         else:
-            # ✅ Добавляем source_price при создании элемента
             temp_cart.append({
                 "name": item["name"],
                 "qty": 1,
                 "comment": "",
-                "source_price": item["price"]  # ← Ключевое исправление!
+                "source_price": item["price"]
             })
-
-        category = USER_EDIT_STATE[user_id].get("last_category")
-        if not category:
-            return
-
-        await show_dishes_by_category(user_id, category)
-
-
-    elif data == "back_to_categories":
-        await show_categories(callback)
+        category = ORDER_STATE[order_id].get("last_category")
+        if category:
+            await show_dishes_by_category(order_id, category)
         await callback.answer()
 
     elif data == "finish_edit":
-        user_id = callback.from_user.id
-        state = USER_EDIT_STATE.get(user_id)
-        if not state:
+        order_id = None
+        for oid, state in ORDER_STATE.items():
+            if state.get("order_message_id") == callback.message.id:
+                order_id = oid
+                break
+
+        if not order_id:
+            await callback.answer("❌ Заказ не найден")
             return
 
-        # Применяем всё из temp_cart в основной заказ
+        state = ORDER_STATE[order_id]
         temp_cart = state.get("temp_cart", [])
         cart = state.setdefault("items", [])
 
@@ -1245,158 +2571,59 @@ async def handle_callback(client, callback):
             if existing:
                 existing["qty"] += new_item["qty"]
             else:
-                # ✅ Копируем source_price
-                cart.append(new_item.copy())  # ← .copy() сохранит все поля
+                cart.append(new_item.copy())
 
-        # Очищаем буфер
         state["temp_cart"] = []
 
-        # Обновляем сообщение
-        first_name = callback.from_user.first_name
-        await update_order_message(user_id, first_name)
+        # ✅ Редактируем сообщение обратно на стандартный вид
+        try:
+            await update_order_message(order_id)
+            logging.info(f"✅ Режим добавления завершён, чек восстановлен: {order_id}")
+        except Exception as e:
+            logging.error(f"❌ Ошибка при восстановлении чека: {e}")
+
+        # ✅ Сохраняем в pending_orders.json
+        update_pending_order_in_file(order_id, state)
+
         await callback.answer("✅ Изменения применены")
+        return
 
     elif data == "edit_zone":
-        await show_delivery_zones(callback.message)
+        await show_delivery_zones(message)
         await callback.answer()
 
     elif data.startswith("zone_"):
         zone = data.replace("zone_", "")
-        USER_EDIT_STATE[user_id]["delivery_zone"] = zone
-        await update_order_message(user_id, callback.from_user.first_name)
-        await callback.answer(f"Район выбран: {zone.capitalize()}")
-
-    elif data.startswith("print_future_"):
-        target_user_id = int(data.replace("print_future_", ""))
-
-        # Ищем заказ в базе будущих заказов
-        future_orders = load_future_orders()
-        order = next((ord for ord in future_orders if ord["user_id"] == target_user_id), None)
-
-        if not order:
-            await callback.answer("❌ Заказ не найден в базе будущих заказов.")
-            logging.warning(f"❌ Заказ не найден в базе: user_id={target_user_id}")
-            return
-
-        # Формируем state для печати
-        state_for_print = {
-            "items": order["items"],
-            "phone": order["phone"],
-            "address": order["address"],
-            "time": order["time"],
-            "delivery_date": order["delivery_date"],
-            "delivery_zone": order["delivery_zone"],
-            "delivery_price": order["delivery_price"],
-            "temp_cart": [],
-            "awaiting_edit_order": False
-        }
-
-        try:
-            print_receipt_html(state_for_print)
-            await callback.answer("🖨️ Чек отправлен на печать!")
-            logging.info(f"🖨️ Чек напечатан по кнопке (из базы): user_id={target_user_id}, заказ №{len(load_orders()) + 1}")
-        except Exception as e:
-            await callback.answer("❌ Ошибка печати.")
-            logging.error(f"❌ Ошибка печати по кнопке: {e}")
+        order_id = callback.message.id
+        if order_id in ORDER_STATE:
+            ORDER_STATE[order_id]["delivery_zone"] = zone
+            await update_order_message(order_id)
+            await callback.answer(f"Район выбран: {zone.capitalize()}")
 
     elif data == "print_receipt":
-        state = USER_EDIT_STATE.get(user_id)
+        order_id = callback.message.id
+        state = ORDER_STATE.get(order_id)
         if not state:
             await callback.answer("Нет данных для печати.")
             return
+        print_receipt_html(state)
+        await callback.answer("🖨️ Чек отправлен на печать!")
 
-        total = calculate_total(state["items"], delivery_price=state.get("delivery_price", 0))
-
-        receipt_lines = []
-        receipt_lines.append("   Магазин \"Орхидея\"")
-        receipt_lines.append("-" * 22)
-        receipt_lines.append(f"Заказ №{len(load_orders()) + 1:06d}")
-        now = datetime.now().strftime("%d.%m %H:%M")
-        receipt_lines.append(f"Время: {now}")
-        receipt_lines.append("-" * 22)
-
-        if state["phone"]:
-            receipt_lines.append(f"Тел: {state['phone']}")
-        if state["address"]:
-            receipt_lines.append(f"Адрес: {state['address']}")
-        if state["time"]:
-            receipt_lines.append(f"Время: {state['time']}")
-        if state.get("delivery_date"):
-            receipt_lines.append(f"Дата: {state['delivery_date']}")
-        if state["delivery_zone"]:
-            receipt_lines.append(f"Район: {state['delivery_zone'].capitalize()}")
-        receipt_lines.append(f"Доставка: {state.get('delivery_price', 0):>6} ₽")
-
-        receipt_lines.append("-" * 22)
-
-        # Добавляем позиции с нумерацией, количеством и ценой на новых строках
-        for idx, item in enumerate(state["items"], start=1):
-            name = item["name"]
-            qty = item["qty"]
-            comment = item["comment"] if item["comment"] else ""
-            price_per_unit = item.get("source_price")
-            if price_per_unit is None:
-                menu_item = next((i for i in MENU_ITEMS if i["name"] == item["name"]), None)
-                price_per_unit = menu_item["price"] if menu_item else 0
-            line_total = price_per_unit * item["qty"]
-
-            # Название блюда
-            item_line = f"{idx}. {name}"
-            receipt_lines.append(item_line)
-
-            # Количество на новой строке
-            qty_line = f"   Кол-во: {qty} шт."
-            receipt_lines.append(qty_line)
-
-            # Цена на новой строке
-            price_line = f"   Цена: {line_total:,}".replace(",", " ") + " ₽"
-            receipt_lines.append(price_line)
-
-            # Комментарий (если есть)
-            if comment:
-                receipt_lines.append(f"   ⚠️{comment.capitalize()}")
-
-            # Разделитель между позициями
-            if idx < len(state["items"]):
-                receipt_lines.append("-" * 22)
-
-        receipt_lines.append("-" * 22)
-
-        # Итого
-        total_str = f"{total:,}".replace(",", " ") + " ₽"
-        receipt_lines.append(f"ИТОГО:     {total_str:>8}")
-
-        receipt_lines.append("-" * 22)
-        receipt_lines.append("Спасибо за заказ!")
-        receipt_lines.append("Приходите ещё!")
-
-        receipt_text = "\n".join(receipt_lines)
-
-        try:
-            print_receipt_html(state)
-            await callback.answer("🖨️ Чек отправлен на печать!")
-        except Exception as e:
-            await callback.answer("❌ Ошибка печати.")
-            logging.error(f"Ошибка печати: {e}")
-
-        try:
-            await bot_app.send_message(
-                chat_id=WORK_GROUP,
-                text=f"🖨️ <b>Чек для печати (58мм)</b>:\n\n<pre>{receipt_text}</pre>"
-            )
-        except Exception as e:
-            logging.error(f"Ошибка отправки чека в Telegram: {e}")
+    else:
+        await callback.answer("❌ Неизвестная команда.")
+        logging.warning(f"⚠️ Необработанный callback_data: {data}")
 
 def generate_receipt_text(state):
     """
     Генерирует текст чека как строку.
     Используется для отправки в Telegram.
     """
+    order_num = int(datetime.now().timestamp()) % 1000000  # Например: 123456
     total = calculate_total(state["items"], delivery_price=state.get("delivery_price", 0))
     lines = []
     lines.append("   Магазин \"Орхидея\"")
     lines.append("-" * 22)
-    lines.append(f"Заказ №{len(load_orders()) + 1:06d}")
+    lines.append(f"Заказ №{order_num:06d}")
     now = datetime.now().strftime("%d.%m %H:%M")
     lines.append(f"Время: {now}")
     lines.append("-" * 22)
@@ -1404,7 +2631,7 @@ def generate_receipt_text(state):
     if state["phone"]:
         lines.append(f"Тел: {state['phone']}")
     if state["address"]:
-        lines.append(f"Адрес: {state['address']}")
+        lines.append(f"Адрес: {state['address'].capitalize()}")
     if state["time"]:
         lines.append(f"Время: {state['time']}")
     if state.get("delivery_date"):
@@ -1462,6 +2689,8 @@ def print_receipt_html(state):
     delivery_cost = state.get("delivery_price", 0)
     total = calculate_total(state["items"], delivery_price=delivery_cost)
 
+    logging.info("Печать чека")
+
     html = f"""
     <!DOCTYPE html>
     <html lang="ru">
@@ -1506,7 +2735,8 @@ def print_receipt_html(state):
         <div class="hr"></div>
     """
 
-    order_num = len(load_orders()) + 1
+    # Генерация номера чека
+    order_num = int(datetime.now().timestamp()) % 1000000
     now = datetime.now().strftime("%d.%m %H:%M")
     html += f"""
         <div>Заказ №{order_num:06d}</div>
@@ -1570,6 +2800,7 @@ def print_receipt_html(state):
                 chrome_path,
                 "--new-window",
                 "--kiosk-printing",
+                "--disable-popup-blocking",
                 file_url
             ])
             logging.info(f"🖨️ Chrome запущен для печати: {file_url}")
@@ -1583,9 +2814,7 @@ def print_receipt_html(state):
 def find_chrome_path():
     """Находит путь к Chrome."""
     paths = [
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        os.path.expandvars(r"C:\Users\%USERNAME%\AppData\Local\Google\Chrome\Application\chrome.exe")
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe"
     ]
     for path in paths:
         if os.path.exists(path):
@@ -1598,35 +2827,14 @@ def cut_text(text, max_len):
         return text
     return text[:max_len - 1] + "…"
 
-async def show_categories(callback_query):
-    """
-    Показывает категории, редактируя текущее сообщение.
-    """
-    user_id = callback_query.from_user.id
-    categories = sorted(list(set(item["category"] for item in MENU_ITEMS)))
-    keyboard = []
-    for cat in categories:
-        keyboard.append([InlineKeyboardButton(cat, callback_data=f"cat_{cat}")])
-    keyboard.append([InlineKeyboardButton("✅ Готово", callback_data="finish_edit")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
 
-    try:
-        await callback_query.message.edit_text("Выберите категорию:", reply_markup=reply_markup)
-        # Сохраняем ID сообщения (уже есть в order_message_id)
-        USER_EDIT_STATE[user_id]["category_message_id"] = callback_query.message.id
-        logging.info(f"📌 Отредактировано сообщение для категорий: {callback_query.message.id}")
-    except Exception as e:
-        if "message is not modified" in str(e).lower():
-            await callback_query.message.edit_text("Выберите категорию: ", reply_markup=reply_markup)
-        else:
-            logging.error(f"❌ Ошибка при редактировании: {e}")
-
-async def show_dishes_by_category(user_id: int, category: str):
+async def show_dishes_by_category(order_id, category: str):
     """
     Показывает блюда по категории, редактируя сохранённое сообщение.
     """
-    state = USER_EDIT_STATE.get(user_id)
+    state = ORDER_STATE.get(order_id)
     if not state:
+        logging.warning(f"❌ Состояние не найдено для order_id={order_id}")
         return
 
     temp_cart = state.get("temp_cart", [])
@@ -1638,10 +2846,9 @@ async def show_dishes_by_category(user_id: int, category: str):
         cart_item = next((it for it in temp_cart if it["name"] == item["name"]), None)
         qty = cart_item["qty"] if cart_item else 0
 
-        btn_text = f"{item['name']}"
+        btn_text = f"{item['name']} — {item['price']}₽"
         if qty > 0:
-            btn_text = f"{item['name']} (x{qty})"
-        btn_text += f" — {item['price']}₽"
+            btn_text = f"{item['name']} (x{qty}) — {item['price']}₽"
 
         btn = InlineKeyboardButton(btn_text, callback_data=f"add_{item['id']}")
         if len(row) >= 1:
@@ -1658,9 +2865,10 @@ async def show_dishes_by_category(user_id: int, category: str):
 
     text = f"🍽️ <b>Категория:</b> {category}\nВыберите блюдо:"
 
-    message_id = state.get("category_message_id")
+    # Fallback: если нет category_message_id — используем order_message_id
+    message_id = state.get("category_message_id") or state.get("order_message_id")
     if not message_id:
-        logging.warning(f"❌ Нет category_message_id для user_id={user_id}")
+        logging.error(f"❌ Не найден ни category_message_id, ни order_message_id для order_id={order_id}")
         return
 
     try:
@@ -1670,7 +2878,7 @@ async def show_dishes_by_category(user_id: int, category: str):
             text=text,
             reply_markup=reply_markup
         )
-        logging.info(f"✅ Обновлено сообщение: {message_id}")
+        logging.info(f"✅ Обновлено сообщение с блюдами: {message_id}")
     except Exception as e:
         if "message is not modified" in str(e).lower():
             try:
@@ -1819,15 +3027,31 @@ def find_delivery_zone_by_address(address):
             zone = str(row[zone_col]).strip()
             price = int(row[price_col]) if pd.notna(row[price_col]) else 0
 
+            # Полное совпадение — приоритет
             if input_clean == db_clean:
                 matches.append((zone, price, street_db))
+            else:
+                # Fuzzy-сравнение
+                ratio = fuzz.token_sort_ratio(input_clean, db_clean)
+                if ratio >= 80:  # Порог можно настроить
+                    matches.append((zone, price, street_db))
+                    logging.info(f"🔍 Fuzzy-совпадение: '{input_clean}' ~ '{db_clean}' (схожесть: {ratio})")
+
+        # Убираем дубли
+        seen = set()
+        unique_matches = []
+        for m in matches:
+            key = (m[0], m[1], m[2].lower())  # zone, price, street
+            if key not in seen:
+                seen.add(key)
+                unique_matches.append(m)
 
         logging.info(f"🔍 Поиск по адресу: '{address}' → clean='{input_clean}'")
-        logging.info(f"   Найдено совпадений: {len(matches)}")
-        for zone, price, street_db in matches:
+        logging.info(f"   Найдено совпадений: {len(unique_matches)}")
+        for zone, price, street_db in unique_matches:
             logging.info(f"   → Зона: {zone}, Цена: {price} ₽, Улица БД: {street_db}")
 
-        return matches
+        return unique_matches
 
     except Exception as e:
         logging.error(f"❌ Ошибка при поиске зоны доставки: {e}")
@@ -1846,13 +3070,8 @@ if __name__ == "__main__":
 
     load_menu()
     load_delivery_zones()
-
-    # Создаём пустые файлы, если не существуют
-    if not os.path.exists(ACTIVE_ORDERS_JSON):
-        save_active_orders([])
-    if not os.path.exists(FUTURE_ORDERS_JSON):
-        save_future_orders([])
-
-    bot_app.run()
+    check_files()
+    load_user_phones()  # ← Добавьте эту строку
 
     logging.info("🚀 Бот успешно запущен и готов к работе.")
+    bot_app.run()

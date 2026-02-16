@@ -1,0 +1,967 @@
+[
+    {
+        "phone": "+79833458877",
+        "address": "30 лет победы 131/2",
+        "time": "18:00",
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 0,
+        "total": 1380,
+        "status": "delivered",
+        "created_at": "2026-02-13T10:13:13.476658"
+    },
+    {
+        "id": "order_1770952599_4",
+        "items": [
+            {
+                "name": "Имбирь 50Гр",
+                "qty": 1,
+                "comment": "",
+                "source_price": 40
+            },
+            {
+                "name": "Сет Сочное Трио",
+                "qty": 1,
+                "comment": "",
+                "source_price": 960
+            }
+        ],
+        "phone": "+79131170575",
+        "address": "Советская 8/a (Орхидея)",
+        "time": "17:00",
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 1000,
+        "status": "delivered",
+        "created_at": "2026-02-13T10:16:52.894639"
+    },
+    {
+        "id": "order_1770952361_3",
+        "items": [
+            {
+                "name": "Овощная 40",
+                "qty": 1,
+                "comment": "",
+                "source_price": 680
+            },
+            {
+                "name": "Гавайская 40",
+                "qty": 1,
+                "comment": "",
+                "source_price": 740
+            },
+            {
+                "name": "Дракон 30",
+                "qty": 1,
+                "comment": "",
+                "source_price": 690
+            },
+            {
+                "name": "Лава креветка",
+                "qty": 1,
+                "comment": "",
+                "source_price": 360
+            },
+            {
+                "name": "Яки кани маки",
+                "qty": 1,
+                "comment": "",
+                "source_price": 360
+            },
+            {
+                "name": "Темпура спайси креветка",
+                "qty": 1,
+                "comment": "",
+                "source_price": 370
+            }
+        ],
+        "phone": "+79833458877",
+        "address": "30 лет победы 131/2",
+        "time": "18:00",
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 100,
+        "total": 3300,
+        "status": "delivered",
+        "created_at": "2026-02-13T10:23:42.184462"
+    },
+    {
+        "id": "order_1770955437_5",
+        "items": [
+            {
+                "name": "БП (40см)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 760
+            }
+        ],
+        "phone": "+79138803315",
+        "address": "Советская 8/a (Орхидея)",
+        "time": "18:30",
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 760,
+        "status": "delivered",
+        "created_at": "2026-02-13T11:05:04.308479"
+    },
+    {
+        "id": "order_1770957003_1",
+        "items": [
+            {
+                "name": "Цезарь 40",
+                "qty": 1,
+                "comment": "",
+                "source_price": 780
+            },
+            {
+                "name": "Шаурма с курицей (Классическая)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 290
+            },
+            {
+                "name": "Шаурма с курицей (Шашлычная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 290
+            }
+        ],
+        "phone": "+79138137066",
+        "address": null,
+        "time": "18:00",
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 1360,
+        "status": "delivered",
+        "created_at": "2026-02-13T11:30:09.859925"
+    },
+    {
+        "id": "order_1770958469_1",
+        "items": [
+            {
+                "name": "Кранч (Краб)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 370
+            },
+            {
+                "name": "Этна (Креветка)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 380
+            },
+            {
+                "name": "Темпура лава (Креветка)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 370
+            },
+            {
+                "name": "Запеченые роллы (Угорь)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 370
+            },
+            {
+                "name": "Спайси роллы (Пламенный поцелуй)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 400
+            },
+            {
+                "name": "Имбирь 50Гр",
+                "qty": 1,
+                "comment": "",
+                "source_price": 40
+            }
+        ],
+        "phone": "+79131102513",
+        "address": "Советская 8/a (Орхидея)",
+        "time": "16:45",
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 1930,
+        "status": "delivered",
+        "created_at": "2026-02-13T11:55:09.709112"
+    },
+    {
+        "id": "order_1770958712_2",
+        "items": [
+            {
+                "name": "Охотничья (30см)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 560
+            },
+            {
+                "name": "Темпура лава (Креветка)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 370
+            },
+            {
+                "name": "Лава (Креветка)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 360
+            },
+            {
+                "name": "Темпура Спайси (Креветка)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 370
+            }
+        ],
+        "phone": "+79832302111",
+        "address": "ул Промышленная, Дом 6, Квартира 12",
+        "time": "18:15",
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 100,
+        "total": 1760,
+        "status": "delivered",
+        "created_at": "2026-02-13T12:02:13.336791"
+    },
+    {
+        "id": "order_1770958978_3",
+        "items": [
+            {
+                "name": "Яки кани маки",
+                "qty": 1,
+                "comment": "",
+                "source_price": 360
+            },
+            {
+                "name": "Лава креветка",
+                "qty": 1,
+                "comment": "",
+                "source_price": 360
+            },
+            {
+                "name": "Соевый ",
+                "qty": 1,
+                "comment": "",
+                "source_price": 30
+            }
+        ],
+        "phone": "+79138556441",
+        "address": "30 лет победы 60",
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 100,
+        "total": 850,
+        "status": "delivered",
+        "created_at": "2026-02-13T12:28:55.945510"
+    },
+    {
+        "id": "order_1770960949_4",
+        "items": [
+            {
+                "name": "Дуэт (40см)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 760
+            },
+            {
+                "name": "Грибная с беконом (30см)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 510
+            }
+        ],
+        "phone": "+79640907295",
+        "address": "Советская 8/a (Орхидея)",
+        "time": "19:00",
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 1270,
+        "status": "delivered",
+        "created_at": "2026-02-13T12:36:32.997991"
+    },
+    {
+        "id": "order_1770961329_5",
+        "items": [
+            {
+                "name": "Шепот гейши",
+                "qty": 1,
+                "comment": "",
+                "source_price": 1320
+            }
+        ],
+        "phone": null,
+        "address": null,
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 1320,
+        "status": "delivered",
+        "created_at": "2026-02-13T12:42:13.222884"
+    },
+    {
+        "id": "order_1770962151_6",
+        "items": [
+            {
+                "name": "Шаурма с курицей (Шашлычная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 290
+            },
+            {
+                "name": "Шаурма с курицей (Пикантная)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 290
+            }
+        ],
+        "phone": "+79609717441",
+        "address": "Шишкова 28",
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 100,
+        "total": 680,
+        "status": "delivered",
+        "created_at": "2026-02-13T12:55:54.598778"
+    },
+    {
+        "id": "order_1770963551_8",
+        "items": [
+            {
+                "name": "(М) Шаурма с курицей (Классическая)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 220
+            }
+        ],
+        "phone": null,
+        "address": null,
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 220,
+        "status": "delivered",
+        "created_at": "2026-02-13T13:19:14.495300"
+    },
+    {
+        "id": "order_1770966138_9",
+        "items": [
+            {
+                "name": "Магазин",
+                "qty": 5,
+                "comment": "",
+                "source_price": 460
+            }
+        ],
+        "phone": null,
+        "address": "Советская 8/a (Орхидея)",
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 2300,
+        "status": "delivered",
+        "created_at": "2026-02-13T14:02:32.915774"
+    },
+    {
+        "id": "order_1770966618_10",
+        "items": [
+            {
+                "name": "Шаурма с курицей (Всё включено)",
+                "qty": 2,
+                "comment": "",
+                "source_price": 290
+            }
+        ],
+        "phone": null,
+        "address": null,
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 580,
+        "status": "delivered",
+        "created_at": "2026-02-13T14:10:23.481513"
+    },
+    {
+        "id": "order_1770967254_11",
+        "items": [
+            {
+                "name": "Филадельфия лайт",
+                "qty": 1,
+                "comment": "",
+                "source_price": 410
+            },
+            {
+                "name": "Калифорния лосось",
+                "qty": 1,
+                "comment": "",
+                "source_price": 390
+            },
+            {
+                "name": "Каппа маки",
+                "qty": 1,
+                "comment": "",
+                "source_price": 240
+            },
+            {
+                "name": "Сяке маки",
+                "qty": 1,
+                "comment": "",
+                "source_price": 300
+            },
+            {
+                "name": "Сяке фурай",
+                "qty": 1,
+                "comment": "",
+                "source_price": 330
+            },
+            {
+                "name": "Темпура креветка",
+                "qty": 1,
+                "comment": "",
+                "source_price": 330
+            },
+            {
+                "name": "Пепперони 30",
+                "qty": 1,
+                "comment": "",
+                "source_price": 530
+            },
+            {
+                "name": "Соевый ",
+                "qty": 2,
+                "comment": "",
+                "source_price": 30
+            },
+            {
+                "name": "Палочки",
+                "qty": 3,
+                "comment": "",
+                "source_price": 5
+            }
+        ],
+        "phone": "+79234305416",
+        "address": null,
+        "time": "17:00",
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 2605,
+        "status": "delivered",
+        "created_at": "2026-02-13T14:23:23.879449"
+    },
+    {
+        "id": "order_1770968486_12",
+        "items": [
+            {
+                "name": "Шаурма с курицей (Всё включено)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 290
+            }
+        ],
+        "phone": null,
+        "address": null,
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 290,
+        "status": "delivered",
+        "created_at": "2026-02-13T14:41:29.667457"
+    },
+    {
+        "id": "order_1770968881_13",
+        "items": [
+            {
+                "name": "Шаурма с курицей (Сырная)",
+                "qty": 2,
+                "comment": "",
+                "source_price": 290
+            },
+            {
+                "name": "Соевый ",
+                "qty": 2,
+                "comment": "",
+                "source_price": 30
+            }
+        ],
+        "phone": null,
+        "address": null,
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 640,
+        "status": "delivered",
+        "created_at": "2026-02-13T14:48:45.019781"
+    },
+    {
+        "id": "order_1770970605_1",
+        "items": [
+            {
+                "name": "Этна креветка",
+                "qty": 1,
+                "comment": "",
+                "source_price": 380
+            },
+            {
+                "name": "Самурай",
+                "qty": 1,
+                "comment": "",
+                "source_price": 1360
+            }
+        ],
+        "phone": "+79539246285",
+        "address": "Горького 28",
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 100,
+        "total": 1840,
+        "status": "delivered",
+        "created_at": "2026-02-13T15:16:53.360480"
+    },
+    {
+        "id": "order_1770971495_3",
+        "items": [
+            {
+                "name": "Шепот гейши",
+                "qty": 1,
+                "comment": "",
+                "source_price": 1320
+            },
+            {
+                "name": "Соевый ",
+                "qty": 2,
+                "comment": "",
+                "source_price": 30
+            }
+        ],
+        "phone": "+79138821879",
+        "address": "Некрасова 3",
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 100,
+        "total": 1480,
+        "status": "delivered",
+        "created_at": "2026-02-13T15:31:38.569757"
+    },
+    {
+        "id": "order_1770973114_4",
+        "items": [
+            {
+                "name": "Beтчинa Mини (Всё включено)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 190
+            },
+            {
+                "name": "Спайси роллы (Креветка)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 360
+            },
+            {
+                "name": "Соевый Соус 50Мл",
+                "qty": 1,
+                "comment": "",
+                "source_price": 30
+            },
+            {
+                "name": "Маки роллы (Лосось)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 300
+            },
+            {
+                "name": "Курица Мини (Всё включено)",
+                "qty": 2,
+                "comment": "",
+                "source_price": 220
+            }
+        ],
+        "phone": "+79528954681",
+        "address": "Советская 8/a (Орхидея)",
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 1320,
+        "status": "delivered",
+        "created_at": "2026-02-13T15:59:07.627180"
+    },
+    {
+        "id": "order_1770973435_6",
+        "items": [
+            {
+                "name": "(М) Шаурма с курицей (Классическая)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 220
+            }
+        ],
+        "phone": null,
+        "address": null,
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 220,
+        "status": "delivered",
+        "created_at": "2026-02-13T16:03:58.993883"
+    },
+    {
+        "id": "order_1770974487_8",
+        "items": [
+            {
+                "name": "(М) Шаурма с курицей (Классическая)",
+                "qty": 2,
+                "comment": "",
+                "source_price": 220
+            }
+        ],
+        "phone": null,
+        "address": null,
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 440,
+        "status": "delivered",
+        "created_at": "2026-02-13T16:21:56.257310"
+    },
+    {
+        "id": "order_1770975781_9",
+        "items": [
+            {
+                "name": "Шаурма с курицей (Сырная)",
+                "qty": 2,
+                "comment": "",
+                "source_price": 290
+            }
+        ],
+        "phone": null,
+        "address": null,
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 580,
+        "status": "delivered",
+        "created_at": "2026-02-13T16:43:10.840349"
+    },
+    {
+        "id": "order_1770977038_10",
+        "items": [
+            {
+                "name": "Сочное трио",
+                "qty": 1,
+                "comment": "",
+                "source_price": 960
+            }
+        ],
+        "phone": null,
+        "address": null,
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 960,
+        "status": "delivered",
+        "created_at": "2026-02-13T17:04:01.539684"
+    },
+    {
+        "id": "order_1770977115_11",
+        "items": [
+            {
+                "name": "Темпура краб",
+                "qty": 1,
+                "comment": "",
+                "source_price": 320
+            },
+            {
+                "name": "Филадельфия лайт",
+                "qty": 1,
+                "comment": "",
+                "source_price": 410
+            },
+            {
+                "name": "Дуэт 30",
+                "qty": 1,
+                "comment": "",
+                "source_price": 560
+            },
+            {
+                "name": "Картофельный бокс",
+                "qty": 1,
+                "comment": "",
+                "source_price": 500
+            },
+            {
+                "name": "Соевый ",
+                "qty": 1,
+                "comment": "",
+                "source_price": 30
+            }
+        ],
+        "phone": "+79138489761",
+        "address": null,
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 1820,
+        "status": "delivered",
+        "created_at": "2026-02-13T17:05:18.085262"
+    },
+    {
+        "id": "order_1770979285_15",
+        "items": [
+            {
+                "name": "Цунами",
+                "qty": 1,
+                "comment": "",
+                "source_price": 3000
+            }
+        ],
+        "phone": null,
+        "address": null,
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 3000,
+        "status": "delivered",
+        "created_at": "2026-02-13T17:41:29.178253"
+    },
+    {
+        "id": "order_1770982259_16",
+        "items": [
+            {
+                "name": "Шаурма с курицей (Классическая)",
+                "qty": 4,
+                "comment": "",
+                "source_price": 290
+            }
+        ],
+        "phone": null,
+        "address": null,
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 1160,
+        "status": "delivered",
+        "created_at": "2026-02-13T18:31:02.222368"
+    },
+    {
+        "id": "order_1770982297_17",
+        "items": [
+            {
+                "name": "Снек бокс",
+                "qty": 1,
+                "comment": "",
+                "source_price": 610
+            },
+            {
+                "name": "Шаурма с курицей (Классическая)",
+                "qty": 3,
+                "comment": "",
+                "source_price": 290
+            }
+        ],
+        "phone": "+79521844971",
+        "address": "Куйбышева 5",
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Парабель",
+        "delivery_price": 100,
+        "total": 1580,
+        "status": "delivered",
+        "created_at": "2026-02-13T18:32:00.438912"
+    },
+    {
+        "id": "order_1770982381_18",
+        "items": [
+            {
+                "name": "Фаворит ",
+                "qty": 1,
+                "comment": "",
+                "source_price": 1500
+            },
+            {
+                "name": "Каппа маки",
+                "qty": 1,
+                "comment": "",
+                "source_price": 240
+            },
+            {
+                "name": "Мексиканец с курицей ",
+                "qty": 1,
+                "comment": "",
+                "source_price": 350
+            },
+            {
+                "name": "Имбирь",
+                "qty": 1,
+                "comment": "",
+                "source_price": 40
+            },
+            {
+                "name": "Васаби",
+                "qty": 2,
+                "comment": "",
+                "source_price": 15
+            }
+        ],
+        "phone": "+79224292716",
+        "address": null,
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 2160,
+        "status": "delivered",
+        "created_at": "2026-02-13T18:33:07.763587"
+    },
+    {
+        "id": "order_1770982469_19",
+        "items": [
+            {
+                "name": "Филaдeльфия Лaйт",
+                "qty": 1,
+                "comment": "",
+                "source_price": 410
+            },
+            {
+                "name": "Темпура (Креветка)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 330
+            },
+            {
+                "name": "Лава (Креветка)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 360
+            },
+            {
+                "name": "Спайси роллы (Креветка)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 360
+            },
+            {
+                "name": "Соевый Соус 50Мл",
+                "qty": 1,
+                "comment": "",
+                "source_price": 30
+            },
+            {
+                "name": "Имбирь 50Гр",
+                "qty": 1,
+                "comment": "",
+                "source_price": 40
+            }
+        ],
+        "phone": "+79528954681",
+        "address": "Советская 8/a (Орхидея)",
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 1530,
+        "status": "delivered",
+        "created_at": "2026-02-13T18:35:23.341876"
+    },
+    {
+        "id": "order_1770982733_20",
+        "items": [
+            {
+                "name": "Шаурма с курицей (Всё включено)",
+                "qty": 3,
+                "comment": "",
+                "source_price": 290
+            }
+        ],
+        "phone": null,
+        "address": null,
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 870,
+        "status": "delivered",
+        "created_at": "2026-02-13T18:38:56.043061"
+    },
+    {
+        "id": "order_1770985932_21",
+        "items": [
+            {
+                "name": "Бекон-чиз (40см)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 680
+            }
+        ],
+        "phone": "+79016089024",
+        "address": "Советская 8/a (Орхидея)",
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 680,
+        "status": "delivered",
+        "created_at": "2026-02-13T19:32:58.679094"
+    },
+    {
+        "id": "order_1770990504_22",
+        "items": [
+            {
+                "name": "Шаурма с курицей (Классическая)",
+                "qty": 3,
+                "comment": "",
+                "source_price": 290
+            }
+        ],
+        "phone": null,
+        "address": null,
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 870,
+        "status": "delivered",
+        "created_at": "2026-02-13T20:48:28.349810"
+    },
+    {
+        "id": "order_1770995043_23",
+        "items": [
+            {
+                "name": "Шаурма с курицей (Классическая)",
+                "qty": 1,
+                "comment": "",
+                "source_price": 290
+            }
+        ],
+        "phone": null,
+        "address": null,
+        "time": null,
+        "delivery_date": "13.02.2026",
+        "delivery_zone": "Самовывоз",
+        "delivery_price": 0,
+        "total": 290,
+        "status": "delivered",
+        "created_at": "2026-02-13T22:04:04.808881"
+    }
+]

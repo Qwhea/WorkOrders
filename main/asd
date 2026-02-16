@@ -1,0 +1,1137 @@
+def print_receipt_html(state):
+    """
+    Генерирует HTML-чек и отправляет на печать через Chrome с флагом --kiosk-printing.
+    Требует: Chrome установлен + ваш принтер 80C установлен как принтер по умолчанию.
+    """
+    import webbrowser
+    import os
+    import tempfile
+    from datetime import datetime
+
+    # Параметры
+    MAX_WIDTH = "58mm"
+    FONT_SIZE = "15px"
+    LINE_HEIGHT = "1.2"
+
+    delivery_cost = state.get("delivery_price", 0)
+    total = calculate_total(state["items"], delivery_price=delivery_cost)
+
+    html = f"""
+    <!DOCTYPE html>
+    <html lang="ru">
+    <head>
+        <meta charset="UTF-8">
+        <title>Чек</title>
+        <style>
+            @page {{
+                size: {MAX_WIDTH} auto;
+                margin: 2mm;
+            }}
+            body {{
+                width: {MAX_WIDTH};
+                font-family: 'sistem_ui';
+                font-size: {FONT_SIZE};
+                font-weight: 700;           /* Полужирный, но не максимальный */
+                line-height: {LINE_HEIGHT};
+                margin: 0;
+                padding: 4px;
+                box-sizing: border-box;
+            }}
+
+            .center {{ text-align: center; }}
+            .right {{ float: right; }}
+            .hr {{ border-top: 1px dashed #000; margin: 4px 0; clear: both; }}
+            .item {{ margin: 2px 0; }}
+            .comment {{ margin-left: 10px; color: #555; font-size: 9px; }}
+            .total {{ font-weight: bold; font-size: 11px; margin-top: 6px; }}
+            .header {{ font-size: 12px; margin-bottom: 4px; }}
+        </style>
+        <script>
+            // Автопечать через 300 мс после загрузки
+            window.addEventListener('load', () => {{
+                setTimeout(() => {{
+                    window.print();
+                }}, 300);
+            }});
+        </script>
+    </head>
+    <body>
+        <div class="center header"><b>Орхидея</b></div>
+        <div class="hr"></div>
+    """
+
+    order_num = len(load_orders()) + 1
+    now = datetime.now().strftime("%d.%m %H:%M")
+    html += f"""
+        <div>Заказ №{order_num:06d}</div>
+        <div>Время: {now}</div>
+        <div class="hr"></div>
+    """
+
+    if state.get("phone"):   html += f"<div>Тел: {state['phone']}</div>"
+    if state.get("address"): html += f"<div>Адр: {cut_text(state['address'], 32)}</div>"
+    if state.get("time"):    html += f"<div>Время: {state['time']}</div>"
+    if state.get("delivery_date"): html += f"<div>Дата: {state['delivery_date']}</div>"
+    if state.get("delivery_zone"):
+        html += f"<div>Район: {state['delivery_zone'].capitalize()}</div>"
+        html += f"<div>Доставка: <span class='right'>{delivery_cost:,} ₽</span></div>".replace(",", " ")
+
+    html += "<div class='hr'></div>"
+
+    for idx, item in enumerate(state["items"], start=1):
+        name = item["name"]
+        qty = item["qty"]
+        comment = item["comment"]
+        price_per_unit = item.get("source_price") or next((i["price"] for i in MENU_ITEMS if i["name"] == item["name"]), 0)
+        line_total = price_per_unit * qty
+
+        html += f"""
+        <div class="item">
+            <div>{idx}. {name}</div>
+            <div>Кол-во: {qty} шт. <span class='right'>{line_total:,} ₽</span></div>
+        </div>
+        """.replace(",", "")
+
+        if comment:
+            html += f"<div class='comment'>⚠️ {comment.capitalize()}</div>"
+        if idx < len(state["items"]):
+            html += "<div class='hr'></div>"
+
+    html += "<div class='hr'></div>"
+    html += f"<div class='total'>ИТОГО: <span class='right'>{total:,} ₽</span></div>".replace(",", "")
+    html += "<div class='hr'></div>"
+    html += "<div class='center'>Спасибо!</div>"
+    html += "</body></html>"
+
+    # Сохраняем временный HTML
+    temp_dir = tempfile.gettempdir()
+    html_path = os.path.join(temp_dir, f"receipt_{int(datetime.now().timestamp())}.html")
+    with open(html_path, "w", encoding="utf-8") as f:
+        f.write(html)
+
+    logging.info(f"📄 Временный HTML сохранён: {html_path}")
+
+    # Формируем URL
+    file_url = f"file://{html_path}"
+
+    # Открываем в Chrome → если настроен --kiosk-printing → напечатает без диалога
+    try:
+        # Используем Chrome явно
+        chrome_path = find_chrome_path()
+        if chrome_path:
+            import subprocess
+            subprocess.Popen([
+                chrome_path,
+                "--new-window",
+                "--kiosk-printing",
+                "--disable-popup-blocking",
+                "--headless",
+                file_url
+            ])
+            logging.info(f"🖨️ Chrome запущен для печати: {file_url}")
+        else:
+            webbrowser.open(file_url)
+            logging.warning("⚠️ Chrome не найден → используем браузер по умолчанию")
+    except Exception as e:
+        logging.error(f"❌ Ошибка запуска Chrome: {e}")
+        webbrowser.open(file_url)
+
+
+
+
+
+
+
+            find_chrome_path()
+
+                        check_files()
+                           await show_zone_selection(message, matches, order_id)
+find_delivery_zone_by_address(address_guess)
+
+
+
+def find_chrome_path():
+    """Находит путь к Chrome."""
+    paths = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+    ]
+    for path in paths:
+        if os.path.exists(path):
+            return path
+    return None
+
+def check_files():
+    if not os.path.exists(ACTIVE_ORDERS_JSON):
+        with open(ACTIVE_ORDERS_JSON, "w", encoding="utf-8") as f:
+            json.dump([], f, ensure_ascii=False, indent=4)
+        logging.info(f"✅ Создан пустой файл: {ACTIVE_ORDERS_JSON}")
+
+    if not os.path.exists(FUTURE_ORDERS_JSON):
+        with open(FUTURE_ORDERS_JSON, "w", encoding="utf-8") as f:
+            json.dump([], f, ensure_ascii=False, indent=4)
+        logging.info(f"✅ Создан пустой файл: {FUTURE_ORDERS_JSON}")
+
+
+
+def find_delivery_zone_by_address(address):
+    if not address or len(address.strip()) < 2:
+        return []
+
+    try:
+        df = pd.read_excel(ADDRESS_XLSX)
+        street_col = next((col for col in df.columns if "street" in col.lower()), "street")
+        zone_col = next((col for col in df.columns if "zone" in col.lower() or "район" in col.lower()), "zone")
+        price_col = next((col for col in df.columns if "price" in col.lower() or "цена" in col.lower()), "price")
+
+        input_clean = clean_street_name(address)
+        if not input_clean:
+            return []
+
+        matches = []
+        for _, row in df.iterrows():
+            street_db = str(row[street_col])
+            db_clean = clean_street_name(street_db)
+            zone = str(row[zone_col]).strip()
+            price = int(row[price_col]) if pd.notna(row[price_col]) else 0
+
+            if input_clean == db_clean:
+                matches.append((zone, price, street_db))
+
+        logging.info(f"🔍 Поиск по адресу: '{address}' → clean='{input_clean}'")
+        logging.info(f"   Найдено совпадений: {len(matches)}")
+        for zone, price, street_db in matches:
+            logging.info(f"   → Зона: {zone}, Цена: {price} ₽, Улица БД: {street_db}")
+
+        return matches
+
+    except Exception as e:
+        logging.error(f"❌ Ошибка при поиске зоны доставки: {e}")
+        return []
+
+async def show_zone_selection(message, matches, order_id):
+    """Отправляет кнопки для выбора правильной зоны."""
+    keyboard = []
+    for i, (zone, price, street_db) in enumerate(matches):
+        keyboard.append([InlineKeyboardButton(f"{zone} — {price} ₽ ({street_db})", callback_data=f"select_zone_{i}")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    msg = await message.reply_text("📍 Найдено несколько зон доставки. Выберите подходящую:", reply_markup=reply_markup)
+
+    # Сохраняем ID сообщения с выбором зоны
+    user_id = message.from_user.id
+    ORDER_STATE[order_id]["zone_selection_message_id"] = msg.id
+    logging.info(f"📌 Сообщение с выбором зоны сохранено: {msg.id}")
+
+
+def cut_text(text, max_len):
+    """Обрезает текст до указанной длины."""
+    if len(text) <= max_len:
+        return text
+    return text[:max_len - 1] + "…"
+
+
+@bot_app.on_callback_query()
+async def handle_callback(client, callback):
+    user_id = callback.from_user.id
+    data = callback.data
+
+    logging.info(f"🔔 Callback от {user_id}: {data}")
+    if user_id not in USER_EDIT_STATE:
+        logging.warning(f"⚠️ Нет состояния для пользователя {user_id}")
+    else:
+        logging.info(f"💬 Состояние найдено: {list(USER_EDIT_STATE[user_id].keys())}")
+
+    if data == "admin_active_orders":
+        active_orders = load_active_orders()
+        if not active_orders:
+            await callback.answer("📭 Нет активных заказов")
+            return
+
+        keyboard = []
+        for order in active_orders:
+            order_id = order.get("id", "б/н")
+            addr = (order.get("address") or "Самовывоз").strip()
+            phone = order.get("phone") or "—"
+            total = order.get("total", 0)
+
+            # Получаем последние 4 цифры телефона, если это возможно
+            if phone != "—" and phone is not None:
+                phone_last_4 = phone[-4:]
+            else:
+                phone_last_4 = "—"
+
+            btn_text = f"{addr.capitalize()}... | {phone_last_4} | {total}₽"
+            keyboard.append([
+                InlineKeyboardButton(
+                    btn_text,
+                    callback_data=f"view_active_order_{order_id}"
+                )
+            ])
+
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back_to_menu")])
+
+        await callback.message.edit_text(
+            "<b>📦 Активные заказы</b>\nВыберите заказ для просмотра:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        await callback.answer()
+
+
+    elif data == "admin_future_orders":
+        future_orders = load_future_orders()
+        if not future_orders:
+            await callback.answer("📭 Нет будущих заказов")
+            return
+
+        keyboard = []
+        for order in future_orders:
+            order_id = order.get("id", "б/н")
+            addr = (order.get("address") or "Самовывоз")[:15].strip()
+            phone = order.get("phone") or "—"
+            date_str = order.get("delivery_date", "—")
+            total = order.get("total", 0)
+
+            phone_last_4 = phone[-4:] if phone and phone != "—" else "—"
+
+            btn_text = f"📅 {date_str} | {addr}... | {phone_last_4} | {total}₽"
+            keyboard.append([
+                InlineKeyboardButton(
+                    btn_text,
+                    callback_data=f"view_future_order_{order_id}"
+                )
+            ])
+
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back_to_menu")])
+
+        await callback.message.edit_text(
+            "<b>📅 Заказы в будущем</b>\nВыберите заказ:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        await callback.answer()
+
+    elif data == "admin_salary":
+        # Простой расчёт: сумма всех активных + будущих заказов
+        active_orders = load_active_orders()
+        future_orders = load_future_orders()
+
+        # Получаем сегодняшнюю дату в формате ДД.ММ.ГГГГ
+        today_str = datetime.now().strftime("%d.%m.%Y")
+
+        # Фильтруем будущие заказы — только на сегодня
+        today_future_orders = [o for o in future_orders if o.get("delivery_date") == today_str]
+
+        total_active = sum(o["total"] for o in active_orders)
+        total_today_future = sum(o["total"] for o in today_future_orders)
+        total_all = total_active + total_today_future
+
+        # Доход от доставки — только по активным и будущим на сегодня
+        delivery_income = (
+                sum(o.get("delivery_price", 0) for o in active_orders) +
+                sum(o.get("delivery_price", 0) for o in today_future_orders)
+        )
+
+        # Выручка от товаров (без доставки)
+        food_income = total_all - delivery_income
+        count_all = len(active_orders) + len(today_future_orders)
+
+        avg_check = food_income // count_all if count_all else 0
+
+        text = textwrap.dedent(f"""
+            <b>💰 Расчёт выручки (зарплата)</b>
+
+            📦 Активные заказы: <b>{total_active:,} ₽</b>
+            📅 Будущие заказы: <b>{total_today_future:,} ₽</b>
+
+            🍣 <b>Выручка:</b> <code>{food_income:,} ₽</code>
+            🚚 <b>Доставка:</b> <code>{delivery_income:,} ₽</code>
+
+            📊 Средний чек (без доставки): <b>{avg_check:,} ₽</b>
+            📌 Всего заказов: <b>{count_all}</b>
+
+            💰 Зарплата: <b>{food_income / 8:.2f} ₽</b>
+        """).strip()
+
+        # Создаём клавиатуру с кнопкой "Назад"
+        keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("⬅️ Назад", callback_data="back_to_menu")]]
+        )
+
+        await callback.message.edit_text(text, reply_markup=keyboard)
+        await callback.answer()
+
+    elif data.startswith("view_active_order_"):
+        order_id = data.replace("view_active_order_", "")
+        active_orders = load_active_orders()
+        order = next((o for o in active_orders if str(o.get("id")) == order_id), None)
+
+        if not order:
+            await callback.answer("❌ Заказ не найден")
+            return
+
+        items_text =  "\n".join(
+            [f"• {item['name']} x{item['qty']} — {item.get('source_price') * item['qty']}₽"
+             for item in order.get("items", [])]
+        ).strip()
+
+        phone = order.get("phone") or "—"
+        address = order.get("address") or "Самовывоз"
+        time_str = order.get("time") or "По готовности"
+        delivery_cost = order.get("delivery_price", 0) or 0
+        total = order.get("total", 0) or 0
+
+        # Формируем текст без ОДНОГО ЛИШНЕГО ПРОБЕЛА
+        lines = [
+            f"📞 <b>Телефон:</b> <code>{phone}</code>",
+            f"🏠 <b>Адрес:</b> {address}",
+            f"⏰ <b>Время:</b> {time_str}",
+            f"📅 <b>Дата доставки:</b> <b>Сегодня</b>",
+            "",
+            f"📋 <b>Состав заказа:</b>"
+        ]
+
+        # Добавляем каждую позицию БЕЗ отступов
+        for line in items_text.split('\n'):
+            lines.append(line.strip())
+
+        lines.extend([
+            "",
+            f"🚚 <b>Доставка:</b> {delivery_cost}₽",
+            f"💰 <b>Итого:</b> <b>{total}₽</b>"
+        ])
+
+        text = "\n".join(lines)
+
+        # Создаём клавиатуру с двумя кнопками в первой строке
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("📝 Редактировать", callback_data=f"edit_order_{order_id}"),
+                InlineKeyboardButton("✅ Заказ готов", callback_data=f"order_ready_{order_id}")
+            ],
+            [
+                InlineKeyboardButton("🖨️ Печать чека", callback_data=f"print_order_{order_id}")
+            ],
+            [
+                InlineKeyboardButton("⬅️ Назад к списку", callback_data="admin_active_orders")
+            ]
+        ])
+
+        await callback.message.edit_text(text.strip(), reply_markup=keyboard)
+        await callback.answer()
+
+    elif data.startswith("order_ready_"):
+        order_id = data.replace("order_ready_", "")
+        active_orders = load_active_orders()
+        order = next((o for o in active_orders if str(o.get("id")) == order_id), None)
+
+        if not order:
+            await callback.answer("❌ Заказ не найден")
+            return
+
+        phone = order.get("phone") or "—"
+        address = order.get("address") or "Самовывоз"
+        total = order.get("total", 0) or 0
+
+        # Отправляем в топик "Доставка" ТОЛЬКО если это доставка
+        if address != "Самовывоз":
+            delivery_message = (
+                f"📦 <b>Заказ готов к доставке</b>\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"📞 <b>Телефон:</b> <code>{phone}</code>\n"
+                f"🏠 <b>Адрес:</b> {address}\n"
+                f"💰 <b>Сумма:</b> <b>{total} ₽</b>\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"✅ Готов к выдаче курьеру"
+            )
+            try:
+                # Создаём кнопку "Доставлен"
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🚚 Доставлен", callback_data=f"order_delivered_{order_id}")]
+                ])
+
+                sent_message = await bot_app.send_message(
+                    chat_id=WORK_GROUP,
+                    text=delivery_message,
+                    reply_to_message_id=THREAD_DELIVERY_ID,
+                    reply_markup=keyboard
+                )
+
+                # Сохраняем ID сообщения
+                order["delivery_message_id"] = sent_message.id
+                save_active_orders(active_orders)
+
+                await callback.answer("✅ Сообщение отправлено в «Доставка».", show_alert=True)
+            except Exception as e:
+                logging.error(f"❌ Не удалось отправить в топик доставки: {e}")
+                await callback.answer("✅ Ошибка отправки в доставку.", show_alert=True)
+        else:
+            # Самовывоз — сразу считаем заказ выполненным
+            delivery_message = (
+                f"🛍️ <b>Заказ на самовывоз готов</b>\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"📞 <b>Телефон:</b> <code>{phone}</code>\n"
+                f"💰 <b>Сумма:</b> <b>{total} ₽</b>\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"✅ Клиент может забрать"
+            )
+            try:
+                # Создаём кнопку "Выдан"
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✅ Выдан", callback_data=f"order_delivered_{order_id}")]
+                ])
+
+                sent_message = await bot_app.send_message(
+                    chat_id=WORK_GROUP,
+                    text=delivery_message,
+                    reply_to_message_id=THREAD_DELIVERY_ID,
+                    reply_markup=keyboard
+                )
+
+                # Сохраняем ID сообщения
+                order["delivery_message_id"] = sent_message.id
+                save_active_orders(active_orders)
+
+                await callback.answer("✅ Сообщение отправлено в «Доставка».", show_alert=True)
+            except Exception as e:
+                logging.error(f"❌ Не удалось отправить в топик доставки: {e}")
+                await callback.answer("✅ Ошибка отправки.", show_alert=True)
+
+    elif data.startswith("order_delivered_"):
+        order_id = data.replace("order_delivered_", "")
+        active_orders = load_active_orders()
+        order = next((o for o in active_orders if str(o.get("id")) == order_id), None)
+
+        if not order:
+            await callback.answer("❌ Заказ не найден")
+            return
+
+        # Удаляем сообщение из топика "Доставка"
+        delivery_msg_id = order.get("delivery_message_id")
+        if delivery_msg_id:
+            try:
+                await bot_app.delete_messages(chat_id=WORK_GROUP, message_ids=delivery_msg_id)
+                logging.info(f"🗑️ Удалено сообщение о доставке: {delivery_msg_id}")
+            except Exception as e:
+                logging.error(f"❌ Не удалось удалить сообщение: {e}")
+
+        # Переносим в историю
+        orders = load_orders()
+        user_id = str(order.get("user_id", "unknown"))
+        if user_id not in orders:
+            orders[user_id] = []
+        orders[user_id].append(order)
+        save_orders(orders)
+        logging.info(f"✅ Заказ №{order_id} перенесён в историю")
+
+        # Удаляем из активных заказов
+        if order in active_orders:
+            active_orders.remove(order)
+            save_active_orders(active_orders)  # ✅ Сохраняем изменения
+            logging.info(f"✅ Заказ №{order_id} удалён из active_orders.json")
+
+        await callback.answer("✅ Заказ отмечен как доставлен/выдан и удалён.", show_alert=True)
+
+    elif data.startswith("view_future_order_"):
+        order_id = data.replace("view_future_order_", "")
+        future_orders = load_future_orders()
+        order = next((o for o in future_orders if str(o.get("id")) == order_id), None)
+
+        if not order:
+            await callback.answer("❌ Заказ не найден")
+            return
+
+        items_text = "\n".join(
+            [f"• {item['name']} x{item['qty']} — {item.get('source_price') * item['qty']}₽"
+             for item in order.get("items", [])]
+        )
+
+        phone = order.get("phone") or "—"
+        address = order.get("address") or "—"
+        time_str = order.get("time") or "По готовности"
+        delivery_cost = order.get("delivery_price", 0)
+        total = order.get("total", 0)
+        delivery_date = order.get("delivery_date", "—")
+
+        # Формируем текст без ОДНОГО ЛИШНЕГО ПРОБЕЛА
+        lines = [
+            f"📞 <b>Телефон:</b> <phone>{phone}</phone>",
+            f"🏠 <b>Адрес:</b> {address}",
+            f"⏰ <b>Время:</b> {time_str}",
+            f"📅 <b>Дата доставки:</b> <b>{delivery_date}</b>",
+            "",
+            f"📋 <b>Состав заказа:</b>"
+        ]
+
+        # Добавляем каждую позицию БЕЗ отступов
+        for line in items_text.split('\n'):
+            lines.append(line.strip())
+
+        lines.extend([
+            "",
+            f"🚚 <b>Доставка:</b> {delivery_cost}₽",
+            f"💰 <b>Итого:</b> <b>{total}₽</b>"
+        ])
+
+        text = "\n".join(lines)
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🖨️ Печать чека", callback_data=f"print_order_{order_id}")],
+            [InlineKeyboardButton("⬅️ Назад к списку", callback_data="admin_active_orders")]
+        ])
+
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🖨️ Печать чека", callback_data=f"print_order_{order_id}")],
+            [InlineKeyboardButton("⬅️ Назад к списку", callback_data="admin_future_orders")]
+        ])
+
+        await callback.message.edit_text(text.strip(), reply_markup=keyboard)
+        await callback.answer()
+
+    elif data == "back_to_menu":
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("📦 Активные заказы", callback_data="admin_active_orders"),
+                 InlineKeyboardButton("📅 Заказы в будущем", callback_data="admin_future_orders")],
+                [InlineKeyboardButton("💰 Зарплата", callback_data="admin_salary")]
+            ]
+        )
+        await callback.message.edit_text("👨‍💼 <b>Админ-меню</b>\nВыберите действие:", reply_markup=keyboard)
+        await callback.answer()
+
+    elif data.startswith("select_zone_"):
+        idx = int(data.replace("select_zone_", ""))
+        matches = USER_EDIT_STATE.get(user_id, {}).get("delivery_matches", [])
+        if 0 <= idx < len(matches):
+            zone, price, street_db = matches[idx]
+            USER_EDIT_STATE[user_id]["delivery_zone"] = zone
+            USER_EDIT_STATE[user_id]["delivery_price"] = price
+            first_name = callback.from_user.first_name
+
+            # Удаляем сообщение с выбором зоны
+            zone_msg_id = USER_EDIT_STATE[user_id].get("zone_selection_message_id")
+            if zone_msg_id:
+                try:
+                    await bot_app.edit_message_text(
+                        chat_id=WORK_GROUP,
+                        message_id=zone_msg_id,
+                        text=f"✅ Выбрано: {zone}"
+                    )
+                except Exception as e:
+                    logging.error(f"Не удалось отредактировать: {e}")
+
+            # Обновляем основное сообщение с заказом
+            await show_editable_order_inline(callback, first_name)
+            await callback.answer(f"Зона выбрана: {zone}")
+        else:
+            await callback.answer("❌ Неверный выбор.")
+
+    elif data == "edit_order_new":
+        state = USER_EDIT_STATE.get(user_id)
+        if not state:
+            await callback.answer("❌ Сессия истекла")
+            return
+
+        # Включаем режим редактирования
+        state["awaiting_edit_order"] = True
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🚫 Отменить", callback_data="cancel_edit")]
+        ])
+
+        try:
+            await callback.message.edit_text(
+                "✏️ Отправьте текст с изменениями:\n\n"
+                "- Добавьте/удалите блюда\n"
+                "- Обновите адрес, телефон, время",
+                reply_markup=keyboard
+            )
+        except Exception as e:
+            logging.error(f"Ошибка при редактировании: {e}")
+
+        await callback.answer()
+
+    elif data.startswith("edit_order_"):
+        order_id = data.replace("edit_order_", "")
+        active_orders = load_active_orders()
+        order = next((o for o in active_orders if str(o.get("id")) == str(order_id)), None)
+
+        if not order:
+            await callback.answer("❌ Заказ не найден")
+            return
+
+        # Отправляем сообщение с инструкцией
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🚫 Отменить редактирование", callback_data=f"cancel_edit_{order_id}")]
+        ])
+        await callback.message.edit_text(
+            f"✏️ Отправьте текст с изменениями для заказа <b>#{order_id}</b>:\n\n"
+            "- Добавьте/удалите блюда\n"
+            "- Обновите адрес, телефон, время\n"
+            "- Можно всё вместе",
+            reply_markup=keyboard
+        )
+        await callback.answer()
+
+    elif data.startswith("edit_order_"):
+        order_id = data.replace("edit_order_", "")
+        active_orders = load_active_orders()
+        order = next((o for o in active_orders if str(o.get("id")) == str(order_id)), None)
+
+        if not order:
+            await callback.answer("❌ Заказ не найден")
+            return
+
+        # Отправляем сообщение с инструкцией
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🚫 Отменить редактирование", callback_data=f"cancel_edit_{order_id}")]
+        ])
+        await callback.message.edit_text(
+            f"✏️ Отправьте текст с изменениями для заказа <b>#{order_id}</b>:\n\n"
+            "- Добавьте/удалите блюда\n"
+            "- Обновите адрес, телефон, время\n"
+            "- Можно всё вместе",
+            reply_markup=keyboard
+        )
+        await callback.answer()
+
+    elif data == "confirm_order":
+        state = USER_EDIT_STATE.get(user_id)
+        if not state:
+            await callback.answer("Заказ не найден.")
+            return
+
+        first_name = callback.from_user.first_name
+        total = calculate_total(state["items"], delivery_price=state.get("delivery_price", 0))
+
+        # === Определяем дату доставки ===
+        delivery_date_str = state.get("delivery_date")
+        today_str = datetime.now().strftime("%d.%m.%Y")
+
+        is_today = delivery_date_str == today_str or not delivery_date_str
+
+        # === Формируем объект заказа ===
+        order_obj = {
+            "user_id": user_id,
+            "client_name": first_name,
+            "phone": state["phone"],
+            "address": state["address"],
+            "time": state["time"],
+            "delivery_date": delivery_date_str or today_str,
+            "delivery_zone": state["delivery_zone"],
+            "delivery_price": state.get("delivery_price", 0),
+            "items": state["items"],
+            "total": total,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+        # === Сохраняем в нужную базу ===
+        if is_today:
+            add_active_order(order_obj)
+            logging.info(f"✅ Активный заказ сохранён: {order_obj['phone']}")
+        else:
+            add_future_order(order_obj)
+            logging.info(f"📅 Будущий заказ сохранён: {order_obj['delivery_date']} | {order_obj['phone']}")
+        # === Печать чека только если сегодня ===
+        if is_today:
+            try:
+                print_receipt_html(state)
+                await callback.message.reply("🖨️ Чек отправлен на печать!")
+            except Exception as e:
+                logging.error(f"❌ Ошибка печати при подтверждении: {e}")
+
+        # === Удаляем из состояния ===
+        del USER_EDIT_STATE[user_id]
+
+        # === Обновляем историю пользователя ===
+        orders = load_orders()
+        user_orders = orders.get(str(user_id), [])
+        user_orders.append(order_obj)
+        orders[str(user_id)] = user_orders
+        save_orders(orders)
+
+    elif data.startswith("cancel_edit_"):
+        order_id = data.replace("cancel_edit_", "")
+        active_orders = load_active_orders()
+        order = next((o for o in active_orders if str(o.get("id")) == str(order_id)), None)
+
+        if not order:
+            await callback.message.edit_text(
+                "❌ Заказ не найден.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⬅️ Назад", callback_data="admin_active_orders")]
+                ])
+            )
+            await callback.answer()
+            return
+
+        # Формируем текст заказа
+        items_text = "\n".join(
+            [f"• {item['name']} x{item['qty']} — {item.get('source_price', 0) * item['qty']}₽"
+             for item in order.get("items", [])]
+        )
+        phone = order.get("phone") or "—"
+        address = order.get("address") or "—"
+        time_str = order.get("time") or "По готовности"
+        delivery_cost = order.get("delivery_price", 0)
+        total = order.get("total", 0)
+
+        lines = [
+            f"📞 <b>Телефон:</b> <code>{phone}</code>",
+            f"🏠 <b>Адрес:</b> {address}",
+            f"⏰ <b>Время:</b> {time_str}",
+            f"📅 <b>Дата доставки:</b> <b>Сегодня</b>",
+            "",
+            f"📋 <b>Состав заказа:</b>"
+        ]
+
+        for line in items_text.split('\n'):
+            lines.append(line.strip())
+
+        lines.extend([
+            "",
+            f"🚚 <b>Доставка:</b> {delivery_cost}₽",
+            f"💰 <b>Итого:</b> <b>{total}₽</b>"
+        ])
+
+        text = "\n".join(lines)
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📝 Редактировать заказ", callback_data=f"edit_order_{order_id}")],
+            [InlineKeyboardButton("🖨️ Печать чека", callback_data=f"print_order_{order_id}")],
+            [InlineKeyboardButton("⬅️ Назад к списку", callback_data="admin_active_orders")]
+        ])
+
+        await callback.message.edit_text(text, reply_markup=keyboard)
+        await callback.answer()
+
+    elif data == "add_item":
+        user_id = callback.from_user.id
+        if user_id not in USER_EDIT_STATE:
+            initialize_user_state(user_id)
+
+        # ✅ Очищаем temp_cart при открытии меню добавления
+        USER_EDIT_STATE[user_id]["temp_cart"] = []
+
+        await show_categories(callback)
+        await callback.answer()
+
+    elif data == "remove_item":
+        user_id = callback.from_user.id
+        if user_id not in USER_EDIT_STATE:
+            initialize_user_state(user_id)
+        state = USER_EDIT_STATE[user_id]
+
+        if not state.get("items"):
+            await callback.answer("В заказе нет блюд.")
+            return
+
+        # Показываем текущие позиции с количеством
+        keyboard = []
+        for item in state["items"]:
+            label = f"{item['name']} (x{item['qty']})"
+            keyboard.append([InlineKeyboardButton(label, callback_data=f"remove_{item['name']}")])
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_order")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        try:
+            await callback.message.edit_text("Выберите позицию для удаления:", reply_markup=reply_markup)
+            await callback.answer()
+        except Exception as e:
+            logging.error(f"❌ Ошибка при открытии удаления: {e}")
+            await callback.answer("Ошибка открытия меню удаления")
+
+    elif data.startswith("remove_"):
+        user_id = callback.from_user.id
+        item_name = data.replace("remove_", "")
+        state = USER_EDIT_STATE.get(user_id)
+        if not state:
+            await callback.answer("❌ Сессия истекла")
+            return
+
+        items = state["items"]
+        item = next((it for it in items if it["name"] == item_name), None)
+        if not item:
+            await callback.answer("Позиция не найдена.")
+            return
+
+        if item["qty"] > 1:
+            item["qty"] -= 1
+            await callback.answer(f"➖ Уменьшено: {item_name} (осталось x{item['qty']})")
+        else:
+            items.remove(item)
+            await callback.answer(f"🗑️ Удалено: {item_name}")
+
+        # Обновляем основное сообщение с заказом
+        first_name = callback.from_user.first_name
+        await update_order_message(user_id, first_name)
+
+        # ⬇️ ВАЖНО: перерисовываем и меню удаления!
+        if items:  # если ещё есть позиции
+            keyboard = []
+            for it in items:
+                label = f"{it['name']} (x{it['qty']})"
+                keyboard.append([InlineKeyboardButton(label, callback_data=f"remove_{it['name']}")])
+            keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_order")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            try:
+                await callback.message.edit_text("Выберите позицию для удаления:", reply_markup=reply_markup)
+            except Exception as e:
+                if "message is not modified" not in str(e).lower():
+                    logging.error(f"❌ Ошибка при обновлении меню удаления: {e}")
+        else:
+            # Если больше нет позиций — возвращаемся к заказу
+            try:
+                await callback.message.edit_text("✅ Все позиции удалены.", reply_markup=None)
+                await asyncio.sleep(1)
+                await update_order_message(user_id, first_name)
+            except Exception as e:
+                logging.error(f"❌ Ошибка при выходе из удаления: {e}")
+
+
+    elif data.startswith("print_order_"):
+        order_id = int(data.replace("print_order_", ""))
+
+        # Поиск заказа в активных
+        active_orders = load_active_orders()
+        order = next((o for o in active_orders if o["id"] == order_id), None)
+
+        if not order:
+            # Если не найден — ищем в будущих
+            future_orders = load_future_orders()
+            order = next((o for o in future_orders if o["id"] == order_id), None)
+
+        if not order:
+            await callback.answer("❌ Заказ не найден")
+            return
+
+        # Формируем state_for_print из данных заказа
+        state_for_print = {
+            "items": order["items"],
+            "phone": order.get("phone", ""),
+            "address": order.get("address", ""),
+            "time": order.get("time", ""),
+            "delivery_date": order.get("delivery_date", ""),
+            "delivery_zone": order.get("delivery_zone", ""),
+            "delivery_price": order.get("delivery_price", 0),
+            # Эти поля нужны, но не используются при печати
+            "temp_cart": [],
+            "awaiting_edit_order": False
+        }
+
+        try:
+            print_receipt_html(state_for_print)
+            await callback.answer("🖨️ Чек отправлен на печать!")
+            logging.info(f"🖨️ Чек напечатан: заказ №{order_id}")
+        except Exception as e:
+            await callback.answer("❌ Ошибка печати.")
+            logging.error(f"❌ Ошибка печати чека (по ID): {e}")
+
+    elif data == "back_to_order":
+        user_id = callback.from_user.id
+        first_name = callback.from_user.first_name
+        await update_order_message(user_id, first_name)
+        await callback.answer()
+
+    elif data.startswith("cat_"):
+        category = data.replace("cat_", "")
+        USER_EDIT_STATE[user_id]["last_category"] = category
+        await show_dishes_by_category(user_id, category)
+        await callback.answer()
+
+    elif data.startswith("add_"):
+        try:
+            item_id = int(data.replace("add_", ""))
+        except ValueError:
+            await callback.answer("❌ Неверный ID блюда")
+            return
+
+        item = next((it for it in MENU_ITEMS if it["id"] == item_id), None)
+        if not item:
+            await callback.answer("❌ Блюдо не найдено")
+            return
+
+        user_id = callback.from_user.id
+        if user_id not in USER_EDIT_STATE:
+            initialize_user_state(user_id)
+
+        temp_cart = USER_EDIT_STATE[user_id]["temp_cart"]
+        existing = next((it for it in temp_cart if it["name"] == item["name"]), None)
+        if existing:
+            existing["qty"] += 1
+        else:
+            # ✅ Добавляем source_price при создании элемента
+            temp_cart.append({
+                "name": item["name"],
+                "qty": 1,
+                "comment": "",
+                "source_price": item["price"]  # ← Ключевое исправление!
+            })
+
+        category = USER_EDIT_STATE[user_id].get("last_category")
+        if not category:
+            return
+
+        await show_dishes_by_category(user_id, category)
+
+
+    elif data == "back_to_categories":
+        await show_categories(callback)
+        await callback.answer()
+
+    elif data == "finish_edit":
+        user_id = callback.from_user.id
+        state = USER_EDIT_STATE.get(user_id)
+        if not state:
+            return
+
+        # Применяем всё из temp_cart в основной заказ
+        temp_cart = state.get("temp_cart", [])
+        cart = state.setdefault("items", [])
+
+        for new_item in temp_cart:
+            existing = next((it for it in cart if it["name"] == new_item["name"]), None)
+            if existing:
+                existing["qty"] += new_item["qty"]
+            else:
+                # ✅ Копируем source_price
+                cart.append(new_item.copy())  # ← .copy() сохранит все поля
+
+        # Очищаем буфер
+        state["temp_cart"] = []
+
+        # Обновляем сообщение
+        first_name = callback.from_user.first_name
+        await update_order_message(user_id, first_name)
+        await callback.answer("✅ Изменения применены")
+
+    elif data == "edit_zone":
+        await show_delivery_zones(callback.message)
+        await callback.answer()
+
+    elif data.startswith("zone_"):
+        zone = data.replace("zone_", "")
+        USER_EDIT_STATE[user_id]["delivery_zone"] = zone
+        await update_order_message(user_id, callback.from_user.first_name)
+        await callback.answer(f"Район выбран: {zone.capitalize()}")
+
+    elif data.startswith("print_future_"):
+        target_user_id = int(data.replace("print_future_", ""))
+
+        # Ищем заказ в базе будущих заказов
+        future_orders = load_future_orders()
+        order = next((ord for ord in future_orders if ord["user_id"] == target_user_id), None)
+
+        if not order:
+            await callback.answer("❌ Заказ не найден в базе будущих заказов.")
+            logging.warning(f"❌ Заказ не найден в базе: user_id={target_user_id}")
+            return
+
+        # Формируем state для печати
+        state_for_print = {
+            "items": order["items"],
+            "phone": order["phone"],
+            "address": order["address"],
+            "time": order["time"],
+            "delivery_date": order["delivery_date"],
+            "delivery_zone": order["delivery_zone"],
+            "delivery_price": order["delivery_price"],
+            "temp_cart": [],
+            "awaiting_edit_order": False
+        }
+
+        try:
+            print_receipt_html(state_for_print)
+            await callback.answer("🖨️ Чек отправлен на печать!")
+            logging.info(f"🖨️ Чек напечатан по кнопке (из базы): user_id={target_user_id}, заказ №{len(load_orders()) + 1}")
+        except Exception as e:
+            await callback.answer("❌ Ошибка печати.")
+            logging.error(f"❌ Ошибка печати по кнопке: {e}")
+
+    elif data == "print_receipt":
+        state = USER_EDIT_STATE.get(user_id)
+        if not state:
+            await callback.answer("Нет данных для печати.")
+            return
+
+        total = calculate_total(state["items"], delivery_price=state.get("delivery_price", 0))
+
+        receipt_lines = []
+        receipt_lines.append("   Магазин \"Орхидея\"")
+        receipt_lines.append("-" * 22)
+        receipt_lines.append(f"Заказ №{len(load_orders()) + 1:06d}")
+        now = datetime.now().strftime("%d.%m %H:%M")
+        receipt_lines.append(f"Время: {now}")
+        receipt_lines.append("-" * 22)
+
+        if state["phone"]:
+            receipt_lines.append(f"Тел: {state['phone']}")
+        if state["address"]:
+            receipt_lines.append(f"Адрес: {state['address']}")
+        if state["time"]:
+            receipt_lines.append(f"Время: {state['time']}")
+        if state.get("delivery_date"):
+            receipt_lines.append(f"Дата: {state['delivery_date']}")
+        if state["delivery_zone"]:
+            receipt_lines.append(f"Район: {state['delivery_zone'].capitalize()}")
+        receipt_lines.append(f"Доставка: {state.get('delivery_price', 0):>6} ₽")
+
+        receipt_lines.append("-" * 22)
+
+        # Добавляем позиции с нумерацией, количеством и ценой на новых строках
+        for idx, item in enumerate(state["items"], start=1):
+            name = item["name"]
+            qty = item["qty"]
+            comment = item["comment"] if item["comment"] else ""
+            price_per_unit = item.get("source_price")
+            if price_per_unit is None:
+                menu_item = next((i for i in MENU_ITEMS if i["name"] == item["name"]), None)
+                price_per_unit = menu_item["price"] if menu_item else 0
+            line_total = price_per_unit * item["qty"]
+
+            # Название блюда
+            item_line = f"{idx}. {name}"
+            receipt_lines.append(item_line)
+
+            # Количество на новой строке
+            qty_line = f"   Кол-во: {qty} шт."
+            receipt_lines.append(qty_line)
+
+            # Цена на новой строке
+            price_line = f"   Цена: {line_total:,}".replace(",", " ") + " ₽"
+            receipt_lines.append(price_line)
+
+            # Комментарий (если есть)
+            if comment:
+                receipt_lines.append(f"   ⚠️{comment.capitalize()}")
+
+            # Разделитель между позициями
+            if idx < len(state["items"]):
+                receipt_lines.append("-" * 22)
+
+        receipt_lines.append("-" * 22)
+
+        # Итого
+        total_str = f"{total:,}".replace(",", " ") + " ₽"
+        receipt_lines.append(f"ИТОГО:     {total_str:>8}")
+
+        receipt_lines.append("-" * 22)
+        receipt_lines.append("Спасибо за заказ!")
+        receipt_lines.append("Приходите ещё!")
+
+        receipt_text = "\n".join(receipt_lines)
+
+        try:
+            print_receipt_html(state)
+            await callback.answer("🖨️ Чек отправлен на печать!")
+        except Exception as e:
+            await callback.answer("❌ Ошибка печати.")
+            logging.error(f"Ошибка печати: {e}")
+
+        try:
+            await bot_app.send_message(
+                chat_id=WORK_GROUP,
+                text=f"🖨️ <b>Чек для печати (58мм)</b>:\n\n<pre>{receipt_text}</pre>"
+            )
+        except Exception as e:
+            logging.error(f"Ошибка отправки чека в Telegram: {e}")
